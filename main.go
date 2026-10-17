@@ -7,6 +7,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
@@ -317,6 +318,9 @@ func main() {
 	}
 
 	var vpnStack stack.Stack
+	// The routes the tunnel installed: what it carries right now, which is the
+	// first source of keep-alive targets.
+	var tunnelRoutes []netip.Prefix
 	if conf.TCPTunnelMode {
 		vpnStack, err = tcptunnel.NewStack(vpnClient)
 		if err != nil {
@@ -342,6 +346,7 @@ func main() {
 			_ = vpnTUNStack.AddRoute("198.18.0.0/16")
 		}
 
+		tunnelRoutes = vpnTUNStack.Routes()
 		vpnStack = vpnTUNStack
 	} else {
 		vpnStack, err = gvisor.NewStack(vpnClient)
@@ -443,7 +448,7 @@ func main() {
 			log.Printf("KeepAlive: %s", warning)
 		}
 
-		derivedTargets, notes := service.DeriveKeepAliveTargets(ipResources)
+		derivedTargets, notes := service.DeriveKeepAliveTargets(tunnelRoutes, ipResources)
 		if len(namedTargets) == 0 {
 			for _, note := range notes {
 				log.Printf("KeepAlive: %s", note)
@@ -453,7 +458,7 @@ func main() {
 		if len(targets) == 0 && !useRemoteDNS {
 			log.Println("Keep alive is disabled: no application target is available and remote DNS is disabled")
 		} else {
-			startKeepAlive(vpnResolver, vpnDialer, targets, conf, vpnClient)
+			startKeepAlive(vpnResolver, vpnDialer, targets, conf)
 		}
 	}
 
@@ -482,7 +487,6 @@ func startKeepAlive(
 	dialer *dial.Dialer,
 	targets []service.KeepAliveTarget,
 	conf configs.Config,
-	vpnClient client.Client,
 ) {
 	keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 	hook_func.RegisterTerminalFunc("CloseKeepAlive", func(ctx context.Context) error {
@@ -495,31 +499,27 @@ func startKeepAlive(
 		Targets:  targets,
 		Interval: time.Duration(conf.KeepAliveInterval) * time.Second,
 		Routing:  service.KeepAliveRouting(dialer),
-		Handler:  keepAliveHandler(vpnClient),
+		Handler:  keepAliveHandler,
 	})
 }
 
-// keepAliveHandler reports what the keep-alive learned, and tells the client that
-// the tunnel carried application traffic - which is the only proof that a restored
-// session actually works.
-func keepAliveHandler(vpnClient client.Client) func(service.KeepAliveResult) {
-	return func(result service.KeepAliveResult) {
-		if atrust, ok := vpnClient.(*atrustclient.Client); ok {
-			atrust.ObserveTunnelTraffic(result.Category == service.KeepAliveOK)
-		}
-		switch result.Category {
-		case service.KeepAliveSession:
-			log.Printf("KeepAlive: the session behind the tunnel is gone (target=%s code=%d, %d consecutive failed rounds)",
-				result.Target, result.Code, result.ConsecutiveFailures)
-		case service.KeepAliveTransport:
-			log.Printf("KeepAlive: transport failure for %d consecutive rounds (target=%s): %v",
-				result.ConsecutiveFailures, result.Target, result.Err)
-		case service.KeepAliveTargetFailure:
-			log.Printf("KeepAlive: no usable target for %d consecutive rounds (target=%s): %v",
-				result.ConsecutiveFailures, result.Target, result.Err)
-		case service.KeepAliveOK:
-			log.Printf("KeepAlive: recovered after %d failed rounds (target=%s)",
-				result.ConsecutiveFailures, result.Target)
-		}
+// keepAliveHandler reports what the keep-alive learned. A session failure is the
+// one outcome that means the tunnel is up but authorizing nothing; the recovery
+// ladder is not built yet, so say exactly that instead of leaving the user to
+// discover it through a dead browser.
+func keepAliveHandler(result service.KeepAliveResult) {
+	switch result.Category {
+	case service.KeepAliveSession:
+		log.Printf("KeepAlive: the session behind the tunnel is gone (target=%s code=%d, %d consecutive failed rounds)",
+			result.Target, result.Code, result.ConsecutiveFailures)
+	case service.KeepAliveTransport:
+		log.Printf("KeepAlive: transport failure for %d consecutive rounds (target=%s): %v",
+			result.ConsecutiveFailures, result.Target, result.Err)
+	case service.KeepAliveTargetFailure:
+		log.Printf("KeepAlive: no usable target for %d consecutive rounds (target=%s): %v",
+			result.ConsecutiveFailures, result.Target, result.Err)
+	case service.KeepAliveOK:
+		log.Printf("KeepAlive: recovered after %d failed rounds (target=%s)",
+			result.ConsecutiveFailures, result.Target)
 	}
 }

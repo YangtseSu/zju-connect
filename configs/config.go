@@ -93,7 +93,7 @@ func Default() Config {
 		SecondaryDNSServer:      "auto",
 		LoginDomain:             "Radius",
 		UpdateBestNodesInterval: 300,
-		SessionRefreshInterval:  60,
+		SessionRefreshInterval:  1800,
 		KeepAliveInterval:       60,
 	}
 }

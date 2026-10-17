@@ -198,7 +198,7 @@ func (s *Session) request(req *http.Request) (*http.Response, error) {
 	// body, never before: the request context also governs reading the response
 	// body, so cancelling it earlier truncates a response nobody has read yet.
 	ctx, cancel := context.WithCancel(req.Context())
-	stop := context.AfterFunc(s.lifetimeCtx(), cancel)
+	stop := context.AfterFunc(s.ctx, cancel)
 
 	resp, err := s.client.Do(req.WithContext(ctx))
 	if err != nil {
