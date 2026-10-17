@@ -188,7 +188,7 @@ func waitForState(t *testing.T, c *Client, want SessionState) {
 	t.Fatalf("session state = %q, want %q", c.currentSessionState(), want)
 }
 
-// TestSessionInvalidDataPlaneAnswersDoNotExit is the Z4 contract: a gateway answer
+// TestSessionInvalidDataPlaneAnswersDoNotExit pins the contract: a gateway answer
 // that says the session is gone fails the request and unwraps to
 // auth.ErrSessionInvalid, instead of taking the process down.
 func TestSessionInvalidDataPlaneAnswersDoNotExit(t *testing.T) {

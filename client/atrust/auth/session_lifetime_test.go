@@ -61,10 +61,10 @@ func authConfigBody(ticket string) string {
 	return `{"code":0,"data":{"isLogin":1,"csrfToken":"csrf-1","ticket":"` + ticket + `","authServerInfoList":[]}}`
 }
 
-// TestRenewalDoesNotInheritTheSetupContext is the live finding of the plan's Z2
-// section: a session built on the setup context is born cancelled, because setup
-// cancels that context the moment it returns. Until the session is handed to the
-// client, the renewal cannot even reach the portal.
+// TestRenewalDoesNotInheritTheSetupContext pins the failure this change fixes: a
+// session built on the setup context is born cancelled, because setup cancels
+// that context the moment it returns. Until the session is handed to the client,
+// the renewal cannot even reach the portal.
 func TestRenewalDoesNotInheritTheSetupContext(t *testing.T) {
 	stub := newPortalStub(t, authConfigBody("ticket-1"))
 

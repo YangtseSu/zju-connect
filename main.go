@@ -458,7 +458,7 @@ func main() {
 		if len(targets) == 0 && !useRemoteDNS {
 			log.Println("Keep alive is disabled: no application target is available and remote DNS is disabled")
 		} else {
-			startKeepAlive(vpnResolver, vpnDialer, targets, conf)
+			startKeepAlive(vpnResolver, vpnDialer, targets, conf, vpnClient)
 		}
 	}
 
@@ -487,6 +487,7 @@ func startKeepAlive(
 	dialer *dial.Dialer,
 	targets []service.KeepAliveTarget,
 	conf configs.Config,
+	vpnClient client.Client,
 ) {
 	keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 	hook_func.RegisterTerminalFunc("CloseKeepAlive", func(ctx context.Context) error {
@@ -499,27 +500,31 @@ func startKeepAlive(
 		Targets:  targets,
 		Interval: time.Duration(conf.KeepAliveInterval) * time.Second,
 		Routing:  service.KeepAliveRouting(dialer),
-		Handler:  keepAliveHandler,
+		Handler:  keepAliveHandler(vpnClient),
 	})
 }
 
-// keepAliveHandler reports what the keep-alive learned. A session failure is the
-// one outcome that means the tunnel is up but authorizing nothing; the recovery
-// ladder is not built yet, so say exactly that instead of leaving the user to
-// discover it through a dead browser.
-func keepAliveHandler(result service.KeepAliveResult) {
-	switch result.Category {
-	case service.KeepAliveSession:
-		log.Printf("KeepAlive: the session behind the tunnel is gone (target=%s code=%d, %d consecutive failed rounds)",
-			result.Target, result.Code, result.ConsecutiveFailures)
-	case service.KeepAliveTransport:
-		log.Printf("KeepAlive: transport failure for %d consecutive rounds (target=%s): %v",
-			result.ConsecutiveFailures, result.Target, result.Err)
-	case service.KeepAliveTargetFailure:
-		log.Printf("KeepAlive: no usable target for %d consecutive rounds (target=%s): %v",
-			result.ConsecutiveFailures, result.Target, result.Err)
-	case service.KeepAliveOK:
-		log.Printf("KeepAlive: recovered after %d failed rounds (target=%s)",
-			result.ConsecutiveFailures, result.Target)
+// keepAliveHandler reports what the keep-alive learned, and tells the client that
+// the tunnel carried application traffic - which is the only proof that a restored
+// session actually works.
+func keepAliveHandler(vpnClient client.Client) func(service.KeepAliveResult) {
+	return func(result service.KeepAliveResult) {
+		if atrust, ok := vpnClient.(*atrustclient.Client); ok {
+			atrust.ObserveTunnelTraffic(result.Category == service.KeepAliveOK)
+		}
+		switch result.Category {
+		case service.KeepAliveSession:
+			log.Printf("KeepAlive: the session behind the tunnel is gone (target=%s code=%d, %d consecutive failed rounds)",
+				result.Target, result.Code, result.ConsecutiveFailures)
+		case service.KeepAliveTransport:
+			log.Printf("KeepAlive: transport failure for %d consecutive rounds (target=%s): %v",
+				result.ConsecutiveFailures, result.Target, result.Err)
+		case service.KeepAliveTargetFailure:
+			log.Printf("KeepAlive: no usable target for %d consecutive rounds (target=%s): %v",
+				result.ConsecutiveFailures, result.Target, result.Err)
+		case service.KeepAliveOK:
+			log.Printf("KeepAlive: recovered after %d failed rounds (target=%s)",
+				result.ConsecutiveFailures, result.Target)
+		}
 	}
 }
