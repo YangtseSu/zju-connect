@@ -1,0 +1,50 @@
+name: Tests
+
+# Fork-only workflow (this file does not exist upstream): upstream CI only
+# builds, so this is where the suite actually runs. It also accepts a `ref`
+# input, which lets any branch be tested from the CLI without adding this file
+# to that branch:
+#
+#   gh workflow run tests.yml --repo YangtseSu/zju-connect -f ref=<branch>
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to test (default: the dispatched ref)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ^1.25
+          cache: true
+
+      - name: Get project dependencies
+        run: go mod download
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
