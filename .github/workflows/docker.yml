@@ -1,15 +1,10 @@
 name: Publish Docker image
 
+# Fork-only change: this workflow logs in to DockerHub with repository secrets
+# that a fork does not have, so on a fork it can only fail. Publishing is
+# upstream's job; keep the file dispatchable for a deliberate run.
 on:
-  release:
-    types: [ published ]
-  push:
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/*.yml"
-      - "Dockerfile"
+  workflow_dispatch:
 
 permissions: write-all
 
