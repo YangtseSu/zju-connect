@@ -9,7 +9,9 @@ name: Tests
 
 on:
   push:
-    branches: [ main ]
+    # `dev` is where this fork's work lands and what its packages build, so the
+    # suite has to run there; `main` is the pristine mirror of upstream.
+    branches: [ main, dev ]
   pull_request:
   workflow_dispatch:
     inputs:
