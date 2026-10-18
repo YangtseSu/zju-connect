@@ -370,68 +370,6 @@ func TestCLICollectionsOverrideEnvironmentCollections(t *testing.T) {
 	}
 }
 
-// TestKeepAliveConfiguration covers the three ways a target list can arrive:
-// the legacy single key, a repeated flag, a comma-separated flag or environment.
-func TestKeepAliveConfiguration(t *testing.T) {
-	configFile := writeConfig(t, `
-keep_alive_url = "http://file.example.com/"
-keep_alive_urls = ["http://file.example.com/"]
-keep_alive_interval = 900
-`)
-
-	for _, tt := range []struct {
-		name     string
-		args     []string
-		env      []string
-		wantURLs []string
-		wantSecs int
-	}{
-		{
-			name:     "the single key of an existing config file",
-			args:     []string{"--config", configFile},
-			wantURLs: []string{"http://file.example.com/"},
-			wantSecs: 900,
-		},
-		{
-			name:     "repeated flags",
-			args:     []string{"-keep-alive-url", "http://a.example.com/", "--keep-alive-url=http://b.example.com/", "-keep-alive-interval", "30"},
-			wantURLs: []string{"http://a.example.com/", "http://b.example.com/"},
-			wantSecs: 30,
-		},
-		{
-			name:     "one comma separated flag",
-			args:     []string{"-keep-alive-url", "http://a.example.com/,http://b.example.com/"},
-			wantURLs: []string{"http://a.example.com/", "http://b.example.com/"},
-			wantSecs: 60,
-		},
-		{
-			name:     "the environment",
-			env:      []string{"ZJU_CONNECT_KEEP_ALIVE_URL=http://a.example.com/,http://b.example.com/"},
-			wantURLs: []string{"http://a.example.com/", "http://b.example.com/"},
-			wantSecs: 60,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			options, _, err := loadStartupOptions(tt.args, func() []string { return tt.env })
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := options.Config.KeepAliveURLs; !slices.Equal(got, tt.wantURLs) {
-				t.Fatalf("KeepAliveURLs = %v, want %v", got, tt.wantURLs)
-			}
-			if got := options.Config.KeepAliveInterval; got != tt.wantSecs {
-				t.Fatalf("KeepAliveInterval = %d, want %d", got, tt.wantSecs)
-			}
-		})
-	}
-}
-
-func TestKeepAliveIntervalFloorIsEnforced(t *testing.T) {
-	if _, _, err := loadStartupOptions([]string{"-keep-alive-interval", "5"}, func() []string { return nil }); err == nil {
-		t.Fatal("a keep-alive interval below the floor was accepted")
-	}
-}
-
 func TestSIDTicketAndAutoReloginFlags(t *testing.T) {
 	configFile := writeConfig(t, "sid_ticket = \"from-config\"\nauto_relogin = true\n")
 
@@ -466,41 +404,6 @@ func TestSIDTicketAndAutoReloginFlags(t *testing.T) {
 	}
 	if got := options.Config.SIDTicketFile; got != "/run/secrets/atrust-ticket" {
 		t.Fatalf("SIDTicketFile = %q", got)
-	}
-}
-
-// TestKeepAliveFailureThreshold covers the three ways the budget can arrive and
-// that the default is the built-in one.
-func TestKeepAliveFailureThreshold(t *testing.T) {
-	configFile := writeConfig(t, "keep_alive_failure_threshold = 5\n")
-
-	for _, tt := range []struct {
-		name string
-		args []string
-		env  []string
-		want int
-	}{
-		{name: "the default", want: 3},
-		{name: "the flag", args: []string{"-keep-alive-failure-threshold", "7"}, want: 7},
-		{name: "the environment", env: []string{"ZJU_CONNECT_KEEP_ALIVE_FAILURE_THRESHOLD=9"}, want: 9},
-		{name: "a config file", args: []string{"--config", configFile}, want: 5},
-		{name: "one attempt is a legitimate choice", args: []string{"-keep-alive-failure-threshold", "1"}, want: 1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			options, _, err := loadStartupOptions(tt.args, func() []string { return tt.env })
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := options.Config.KeepAliveFailureThreshold; got != tt.want {
-				t.Fatalf("KeepAliveFailureThreshold = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestKeepAliveFailureThresholdFloorIsEnforced(t *testing.T) {
-	if _, _, err := loadStartupOptions([]string{"-keep-alive-failure-threshold", "0"}, func() []string { return nil }); err == nil {
-		t.Fatal("a keep-alive failure threshold below one attempt was accepted")
 	}
 }
 

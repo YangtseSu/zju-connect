@@ -69,11 +69,6 @@ type Config struct {
 	// AutoRelogin lets a dead session repeat the full login. Off by default: a
 	// login rotates the device token and drops other clients of the account.
 	AutoRelogin bool `koanf:"auto_relogin"`
-
-	// KeepAliveFailureThreshold is how many consecutive failed attempts a named
-	// target gets before the round gives up on it. The client's userspace netstack
-	// drops an occasional connection on its own, so one miss is not evidence.
-	KeepAliveFailureThreshold int `koanf:"keep_alive_failure_threshold"`
 }
 
 type SinglePortForwarding struct {
@@ -99,7 +94,6 @@ func Default() Config {
 		LoginDomain:             "Radius",
 		UpdateBestNodesInterval: 300,
 		SessionRefreshInterval:  60,
-		KeepAliveInterval:       60,
 	}
 	// The client's userspace netstack drops an occasional connection by itself,
 	// so a named target gets a few attempts before the round gives up on it.
