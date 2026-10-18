@@ -370,39 +370,58 @@ func TestCLICollectionsOverrideEnvironmentCollections(t *testing.T) {
 	}
 }
 
-func TestSIDTicketAndAutoReloginFlags(t *testing.T) {
-	configFile := writeConfig(t, "sid_ticket = \"from-config\"\nauto_relogin = true\n")
+// TestKeepAliveConfiguration covers the one target source (the existing
+// comma-separated key) and the interval.
+func TestKeepAliveConfiguration(t *testing.T) {
+	configFile := writeConfig(t, `
+keep_alive_url = "http://file.example.com/"
+keep_alive_interval = 900
+`)
 
 	for _, tt := range []struct {
-		name       string
-		args       []string
-		wantTicket string
-		wantAuto   bool
+		name     string
+		args     []string
+		env      []string
+		wantURLs string
+		wantSecs int
 	}{
-		{"defaults", nil, "", false},
-		{"the config keys", []string{"--config", configFile}, "from-config", true},
-		{"the auto-relogin flag", []string{"-auto-relogin"}, "", true},
+		{
+			name:     "the key of an existing config file",
+			args:     []string{"--config", configFile},
+			wantURLs: "http://file.example.com/",
+			wantSecs: 900,
+		},
+		{
+			name:     "one comma separated flag",
+			args:     []string{"-keep-alive-url", "http://a.example.com/,http://b.example.com/"},
+			wantURLs: "http://a.example.com/,http://b.example.com/",
+			wantSecs: 60,
+		},
+		{
+			name:     "the environment",
+			env:      []string{"ZJU_CONNECT_KEEP_ALIVE_URL=http://a.example.com/,http://b.example.com/"},
+			wantURLs: "http://a.example.com/,http://b.example.com/",
+			wantSecs: 60,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			options, _, err := loadStartupOptions(tt.args, func() []string { return nil })
+			options, _, err := loadStartupOptions(tt.args, func() []string { return tt.env })
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := options.Config.SIDTicket; got != tt.wantTicket {
-				t.Fatalf("SIDTicket = %q, want %q", got, tt.wantTicket)
+			if got := options.Config.KeepAliveURL; got != tt.wantURLs {
+				t.Fatalf("KeepAliveURL = %q, want %q", got, tt.wantURLs)
 			}
-			if got := options.Config.AutoRelogin; got != tt.wantAuto {
-				t.Fatalf("AutoRelogin = %t, want %t", got, tt.wantAuto)
+			if got := options.Config.KeepAliveInterval; got != tt.wantSecs {
+				t.Fatalf("KeepAliveInterval = %d, want %d", got, tt.wantSecs)
 			}
 		})
 	}
+}
 
-	options, _, err := loadStartupOptions([]string{"-sid-ticket-file", "/run/secrets/atrust-ticket"}, func() []string { return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := options.Config.SIDTicketFile; got != "/run/secrets/atrust-ticket" {
-		t.Fatalf("SIDTicketFile = %q", got)
+func TestKeepAliveIntervalFloorIsEnforced(t *testing.T) {
+	if _, _, err := loadStartupOptions([]string{"-keep-alive-interval", "5"}, func() []string { return nil }); err == nil {
+		t.Fatal("a keep-alive interval below the floor was accepted")
 	}
 }
 

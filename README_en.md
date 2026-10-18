@@ -139,11 +139,9 @@
 
 + `disable-keep-alive`: Disable periodic keep-alive. It is on by default
 
-+ `keep-alive-url`: Target of the keep-alive request, either repeated or comma separated. It has to be a **`http://` address reachable inside the VPN** (for example `http://10.0.0.1/`). An `https://` target is reached with CONNECT, which is not application traffic and does not hold the session open (it is still probed, with a warning). The default is empty: a target is then derived from the route table the tunnel installed itself (with `-add-route` those are single-address routes, and the address also has to be granted to the account), and only when no single-address route yields one does it fall back to the resource list the server granted; only if neither yields anything does keep-alive fall back to the server-provided DNS probe (a name lookup is not application traffic and does not hold the session)
++ `keep-alive-url`: Target of the keep-alive request, comma separated for more than one. It has to be a **`http://` address reachable inside the VPN** (for example `http://10.0.0.1/`). An `https://` target is reached with CONNECT, which is not application traffic and does not hold the session open (it is still probed, with a warning). The default is empty: a target is then derived from the resource list the server granted, and only a grant that covers port 80 is used; a single-port grant such as 22 or 443 is not probed as an HTTP service. Only if that yields nothing does keep-alive fall back to the server-provided DNS probe (a name lookup is not application traffic and does not hold the session)
 
-+ `keep-alive-interval`: Keep-alive interval in seconds, default `60`, minimum `10`, jittered by ±10%. On this deployment an idle session expires after roughly 10 minutes, so do not raise it past that
-
-+ `keep-alive-failure-threshold`: How many consecutive failed attempts a named target gets before it counts as dead, default `3`, minimum `1`. The client's userspace netstack drops an occasional connection on its own, so a single miss is not evidence; a lossier network can raise it. `1` (no retry) is a valid choice
++ `keep-alive-interval`: Keep-alive interval in seconds, default `60`, minimum `10`. On this deployment an idle session expires after roughly 10 minutes, so do not raise it past that
 
 + `remote-dns-server`: Remote DNS server address, default is `auto`. Set to `auto` to use the DNS server obtained from the server; disable remote DNS if it fails to obtain
 

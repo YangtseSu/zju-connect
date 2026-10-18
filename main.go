@@ -447,12 +447,12 @@ func main() {
 	}
 
 	if !conf.DisableKeepAlive {
-		namedTargets, warnings := service.NamedKeepAliveTargets(append([]string{conf.KeepAliveURL}, conf.KeepAliveURLs...))
+		namedTargets, warnings := service.NamedKeepAliveTargets(conf.KeepAliveURL)
 		for _, warning := range warnings {
 			log.Printf("KeepAlive: %s", warning)
 		}
 
-		derivedTargets, notes := service.DeriveKeepAliveTargets(tunnelRoutes, ipResources)
+		derivedTargets, notes := service.DeriveKeepAliveTargets(ipResources)
 		if len(namedTargets) == 0 {
 			for _, note := range notes {
 				log.Printf("KeepAlive: %s", note)
@@ -462,7 +462,7 @@ func main() {
 		if len(targets) == 0 && !useRemoteDNS {
 			log.Println("Keep alive is disabled: no application target is available and remote DNS is disabled")
 		} else {
-			startKeepAlive(vpnResolver, vpnDialer, targets, conf, vpnClient)
+			startKeepAlive(vpnResolver, vpnDialer, targets, conf)
 		}
 	}
 
@@ -491,7 +491,6 @@ func startKeepAlive(
 	dialer *dial.Dialer,
 	targets []service.KeepAliveTarget,
 	conf configs.Config,
-	vpnClient client.Client,
 ) {
 	keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 	hook_func.RegisterTerminalFunc("CloseKeepAlive", func(ctx context.Context) error {
@@ -499,38 +498,9 @@ func startKeepAlive(
 		return nil
 	})
 
-	log.Printf("KeepAlive: probing %d target(s) every %ds, giving up on a named target after %d failed attempt(s)",
-		len(targets), conf.KeepAliveInterval, conf.KeepAliveFailureThreshold)
+	log.Printf("KeepAlive: probing %d target(s) every %ds", len(targets), conf.KeepAliveInterval)
 	go service.KeepAlive(keepAliveCtx, resolver, dialer, service.KeepAliveOptions{
-		Targets:          targets,
-		Interval:         time.Duration(conf.KeepAliveInterval) * time.Second,
-		FailureThreshold: conf.KeepAliveFailureThreshold,
-		Routing:          service.KeepAliveRouting(dialer),
-		Handler:          keepAliveHandler(vpnClient),
+		Targets:  targets,
+		Interval: time.Duration(conf.KeepAliveInterval) * time.Second,
 	})
-}
-
-// keepAliveHandler reports what the keep-alive learned, and tells the client that
-// the tunnel carried application traffic - which is the only proof that a restored
-// session actually works.
-func keepAliveHandler(vpnClient client.Client) func(service.KeepAliveResult) {
-	return func(result service.KeepAliveResult) {
-		if atrust, ok := vpnClient.(*atrustclient.Client); ok {
-			atrust.ObserveTunnelTraffic(result.Category == service.KeepAliveOK)
-		}
-		switch result.Category {
-		case service.KeepAliveSession:
-			log.Printf("KeepAlive: the session behind the tunnel is gone (target=%s code=%d, %d consecutive failed rounds)",
-				result.Target, result.Code, result.ConsecutiveFailures)
-		case service.KeepAliveTransport:
-			log.Printf("KeepAlive: transport failure for %d consecutive rounds (target=%s): %v",
-				result.ConsecutiveFailures, result.Target, result.Err)
-		case service.KeepAliveTargetFailure:
-			log.Printf("KeepAlive: no usable target for %d consecutive rounds (target=%s): %v",
-				result.ConsecutiveFailures, result.Target, result.Err)
-		case service.KeepAliveOK:
-			log.Printf("KeepAlive: recovered after %d failed rounds (target=%s)",
-				result.ConsecutiveFailures, result.Target)
-		}
-	}
 }

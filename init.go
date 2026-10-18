@@ -116,8 +116,8 @@ func newFlagSet(defaults configs.Config) *pflag.FlagSet {
 	flags.String("debug-pcap-file", defaults.DebugPCAPFile, "Save reconstructed VPN traffic to a PCAP file")
 	flags.String("debug-tls-log-file", defaults.DebugTLSLogFile, "Save TLS session secrets in NSS key log format")
 	flags.Bool("disable-keep-alive", defaults.DisableKeepAlive, "Disable keep alive")
+	flags.String("keep-alive-url", defaults.KeepAliveURL, "Keep alive URL (comma separated)")
 	flags.Int("keep-alive-interval", defaults.KeepAliveInterval, "Keep alive interval in seconds (minimum 10)")
-	flags.Int("keep-alive-failure-threshold", defaults.KeepAliveFailureThreshold, "Consecutive failed attempts before a keep-alive target counts as dead (minimum 1)")
 	flags.String("remote-dns-server", defaults.RemoteDNSServer, "Remote DNS server address")
 	flags.String("zju-dns-server", defaults.RemoteDNSServer, "Remote DNS server address")
 	_ = flags.MarkDeprecated("zju-dns-server", "use --remote-dns-server instead")
@@ -446,12 +446,6 @@ func applyCollectionValues(k *koanf.Koanf, values collectionValues) error {
 		}
 	}
 
-	keepAliveURLs := values[collectionKeepAliveURL]
-	if keepAliveURLs.Set {
-		if err := k.Set("keep_alive_urls", parseKeepAliveURLs(keepAliveURLs.Value)); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -527,10 +521,8 @@ func zjuServerWorkaround(cfg *configs.Config) {
 }
 
 func validateConfig(cfg configs.Config) error {
-	if cfg.SessionRefreshInterval != 0 && cfg.SessionRefreshInterval < 30 {
-		// 0 disables the renewal loop on purpose; anything else below the floor
-		// is a mistake that would hammer the portal.
-		return fmt.Errorf("ZJU Connect: session-refresh-interval must be 0 (disabled) or at least 30 seconds")
+	if cfg.KeepAliveInterval < 10 {
+		return fmt.Errorf("ZJU Connect: keep-alive-interval must be at least 10 seconds")
 	}
 	if cfg.Protocol != "easyconnect" && cfg.Protocol != "atrust" {
 		return fmt.Errorf("unsupported VPN protocol: %s", cfg.Protocol)

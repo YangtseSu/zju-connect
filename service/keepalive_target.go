@@ -13,26 +13,26 @@ const (
 	// maxDerivedCandidates bounds one discovery round. A derived candidate is a
 	// guess, so it is probed on a short leash and only a handful of them.
 	maxDerivedCandidates = 4
-	// derivedHTTPPort is the port a granted resource has to cover to be probed
-	// as a plain HTTP application address.
+	// derivedHTTPPort is the only port a granted resource is probed on. A grant
+	// for 22 or 443 is not an HTTP service, and probing it with plain HTTP both
+	// fails and consumes a candidate slot that a real port-80 resource needs.
 	derivedHTTPPort = 80
 )
 
-// NamedKeepAliveTargets validates the values of -keep-alive-url. A named target
-// is what a human chose, so it is probed with a generous timeout and a retry
-// budget instead of a single short-leash attempt.
-func NamedKeepAliveTargets(urls []string) ([]KeepAliveTarget, []string) {
+// NamedKeepAliveTargets validates the comma-separated value of -keep-alive-url.
+// A named target is what a human chose, so it is probed with a generous timeout.
+func NamedKeepAliveTargets(value string) ([]KeepAliveTarget, []string) {
 	var targets []KeepAliveTarget
 	var warnings []string
 	seen := make(map[string]bool)
 
-	for _, raw := range urls {
-		value := strings.TrimSpace(raw)
-		if value == "" {
+	for _, raw := range strings.Split(value, ",") {
+		target := strings.TrimSpace(raw)
+		if target == "" {
 			continue
 		}
 
-		parsed, err := url.Parse(value)
+		parsed, err := url.Parse(target)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			warnings = append(warnings, fmt.Sprintf(
 				"-keep-alive-url %q is not a http:// or https:// URL and is ignored", raw))
@@ -42,70 +42,25 @@ func NamedKeepAliveTargets(urls []string) ([]KeepAliveTarget, []string) {
 			warnings = append(warnings, fmt.Sprintf(
 				"-keep-alive-url %s: an https target is reached with CONNECT, which is not application "+
 					"traffic and does not hold the session open; use a plain http:// address inside the VPN",
-				value))
+				target))
 		}
-		if seen[value] {
+		if seen[target] {
 			continue
 		}
-		seen[value] = true
-		targets = append(targets, KeepAliveTarget{URL: value, Named: true})
+		seen[target] = true
+		targets = append(targets, KeepAliveTarget{URL: target, Named: true})
 	}
 
 	return targets, warnings
 }
 
-// DeriveKeepAliveTargets turns the destinations the tunnel carries into
-// candidate HTTP URLs. The tunnel's own route table comes first: a route is an
-// address the datapath carries right now, while a granted resource only says the
-// account may use that address. The granted resources are the fallback, so a
-// tunnel that installed no route (no -add-route, or another mode than TUN)
-// derives exactly what it derived before. It never invents an address: every
-// candidate comes from one of the two, and one that answers is an application
-// the user has.
-func DeriveKeepAliveTargets(
-	routes []netip.Prefix,
-	ipResources []client.IPResource,
-) ([]KeepAliveTarget, []string) {
+// DeriveKeepAliveTargets turns the granted resources into candidate HTTP URLs.
+// It never invents an address, and only a grant that covers port 80 is a
+// candidate: other ports and https:// are the job of -keep-alive-url.
+func DeriveKeepAliveTargets(ipResources []client.IPResource) ([]KeepAliveTarget, []string) {
 	var targets []KeepAliveTarget
 	var notes []string
 	seen := make(map[string]bool)
-
-	routed := hostRouteAddresses(routes)
-	routedTargets := 0
-	for _, address := range routed {
-		if len(targets) >= maxDerivedCandidates {
-			break
-		}
-
-		resource, ok := resourceCarryingAddress(ipResources, address)
-		if !ok {
-			notes = append(notes, fmt.Sprintf(
-				"route %s is not among the granted resources, the tunnel refuses it", address))
-			continue
-		}
-		port, allowed := resourceHTTPPort(resource)
-		if !allowed {
-			notes = append(notes, fmt.Sprintf(
-				"route %s is granted without a plain HTTP port, not probing it", address))
-			continue
-		}
-
-		value := httpTargetURL(address, port)
-		if seen[value] {
-			continue
-		}
-		seen[value] = true
-		targets = append(targets, KeepAliveTarget{URL: value})
-		routedTargets++
-	}
-
-	switch {
-	case routedTargets > 0:
-		notes = append(notes, fmt.Sprintf(
-			"probing %d address(es) the tunnel routes itself", routedTargets))
-	case len(routes) > 0:
-		notes = append(notes, "the tunnel's routes yield no plain HTTP target, probing the granted resources")
-	}
 
 	for _, resource := range ipResources {
 		if len(targets) >= maxDerivedCandidates {
@@ -138,29 +93,10 @@ func DeriveKeepAliveTargets(
 	}
 
 	if len(targets) == 0 {
-		notes = append(notes, "no HTTP application target could be derived from the tunnel's routes "+
-			"or the granted resources")
+		notes = append(notes, "no HTTP application target could be derived from the granted resources")
 	}
 
 	return targets, notes
-}
-
-// hostRouteAddresses returns the single-address routes of a route table, in
-// order. A wider prefix says the tunnel carries a range, not which address in it
-// answers a probe.
-func hostRouteAddresses(routes []netip.Prefix) []netip.Addr {
-	addresses := make([]netip.Addr, 0, len(routes))
-	for _, route := range routes {
-		if !route.IsValid() {
-			continue
-		}
-		address := route.Addr()
-		if address.Is6() || route.Bits() != address.BitLen() {
-			continue
-		}
-		addresses = append(addresses, address)
-	}
-	return addresses
 }
 
 // resourceForwardsProtocol reports whether the tunnel forwards a resource's
@@ -196,42 +132,14 @@ func resourceMaximumAddress(resource client.IPResource) (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
-// resourceHTTPPort returns the port a resource allows for a plain HTTP probe: 80
-// when it covers 80, otherwise the single port it grants.
+// resourceHTTPPort returns the port a resource allows for a plain HTTP probe.
+// Only port 80 qualifies: a single port such as 22 or 443 is not an HTTP
+// service, and probing it would waste a candidate slot.
 func resourceHTTPPort(resource client.IPResource) (int, bool) {
-	switch {
-	case resource.PortMin <= derivedHTTPPort && resource.PortMax >= derivedHTTPPort:
+	if resource.PortMin <= derivedHTTPPort && resource.PortMax >= derivedHTTPPort {
 		return derivedHTTPPort, true
-	case resource.PortMin == resource.PortMax && resource.PortMin > 0:
-		return resource.PortMin, true
 	}
 	return 0, false
-}
-
-// resourceCarryingAddress returns the first resource that covers an address, so a
-// route can be probed at the port that address is actually granted for.
-func resourceCarryingAddress(
-	resources []client.IPResource,
-	address netip.Addr,
-) (client.IPResource, bool) {
-	for _, resource := range resources {
-		if !resourceForwardsProtocol(resource) {
-			continue
-		}
-		minimum, ok := resourceAddress(resource)
-		if !ok {
-			continue
-		}
-		maximum, ok := resourceMaximumAddress(resource)
-		if !ok {
-			continue
-		}
-		if address.Compare(minimum) < 0 || address.Compare(maximum) > 0 {
-			continue
-		}
-		return resource, true
-	}
-	return client.IPResource{}, false
 }
 
 // httpTargetURL builds the probe URL for an address and a port.

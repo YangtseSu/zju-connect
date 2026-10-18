@@ -25,7 +25,6 @@ type Config struct {
 	CustomDNSList       []SingleCustomDNS      `koanf:"custom_dns"`
 	DisableKeepAlive    bool                   `koanf:"disable_keep_alive"`
 	KeepAliveURL        string                 `koanf:"keep_alive_url"`
-	KeepAliveURLs       []string               `koanf:"keep_alive_urls"`
 	KeepAliveInterval   int                    `koanf:"keep_alive_interval"`
 	TCPTunnelMode       bool                   `koanf:"tcp_tunnel_mode"`
 	TUNMode             bool                   `koanf:"tun_mode"`
@@ -93,7 +92,8 @@ func Default() Config {
 		SecondaryDNSServer:      "auto",
 		LoginDomain:             "Radius",
 		UpdateBestNodesInterval: 300,
-		SessionRefreshInterval:  60,
+		SessionRefreshInterval:  1800,
+		KeepAliveInterval:       60,
 	}
 	// The client's userspace netstack drops an occasional connection by itself,
 	// so a named target gets a few attempts before the round gives up on it.
