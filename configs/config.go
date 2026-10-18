@@ -95,8 +95,5 @@ func Default() Config {
 		SessionRefreshInterval:  1800,
 		KeepAliveInterval:       60,
 	}
-	// The client's userspace netstack drops an occasional connection by itself,
-	// so a named target gets a few attempts before the round gives up on it.
-	cfg.KeepAliveFailureThreshold = 3
 	return cfg
 }
