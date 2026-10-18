@@ -86,6 +86,9 @@ type KeepAliveOptions struct {
 	// Routing reports where an attempt to a target would go (tunnel, direct or
 	// denied); it may be nil, and a nil answer is reported as unknown.
 	Routing func(ctx context.Context, target string) (string, error)
+	// FailureThreshold is how many consecutive failed attempts a named target
+	// gets before the round gives up on it; 0 keeps the built-in default.
+	FailureThreshold int
 	// Handler is called for every failed round and for the round that recovers
 	// from a failure streak, so the session machinery can react.
 	Handler func(KeepAliveResult)
@@ -154,7 +157,12 @@ func keepAliveRound(
 		attempts := 1
 		timeout := candidateKeepAliveTimeout
 		if target.Named {
-			attempts = keepAliveAttempts
+			attempts = options.FailureThreshold
+			if attempts < 1 {
+				// Unset: the built-in budget. A configured 1 is honoured, because
+				// "give up after one miss" is a legitimate choice.
+				attempts = keepAliveAttempts
+			}
 			timeout = keepAliveRequestTimeout
 		}
 

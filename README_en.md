@@ -143,6 +143,8 @@
 
 + `keep-alive-interval`: Keep-alive interval in seconds, default `60`, minimum `10`, jittered by ±10%. On this deployment an idle session expires after roughly 10 minutes, so do not raise it past that
 
++ `keep-alive-failure-threshold`: How many consecutive failed attempts a named target gets before it counts as dead, default `3`, minimum `1`. The client's userspace netstack drops an occasional connection on its own, so a single miss is not evidence; a lossier network can raise it. `1` (no retry) is a valid choice
+
 + `remote-dns-server`: Remote DNS server address, default is `auto`. Set to `auto` to use the DNS server obtained from the server; disable remote DNS if it fails to obtain
 
 + `secondary-dns-server`: Standby DNS server used when the remote DNS server cannot resolve. The default `auto` uses the second server supplied by VPN policy, then falls back to `114.114.114.114`. Leave blank to use system default DNS, but it must be set when `dns-hijack` is enabled

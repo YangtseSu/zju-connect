@@ -253,6 +253,43 @@ func TestKeepAliveOpensAFreshConnectionPerProbe(t *testing.T) {
 // TestKeepAliveReportsAFailureStreakAndItsRecovery drives the loop, not just a
 // round: the session dies for one round, comes back in the next, and the handler
 // has to see both.
+// TestKeepAliveHonoursTheConfiguredFailureThreshold pins the budget the
+// -keep-alive-failure-threshold flag feeds: a named target is probed exactly
+// that many times, one attempt is honoured as written, and an unset value keeps
+// the built-in default.
+func TestKeepAliveHonoursTheConfiguredFailureThreshold(t *testing.T) {
+	shrinkRetryBudget(t)
+
+	for _, tt := range []struct {
+		name      string
+		threshold int
+		want      int64
+	}{
+		{name: "a configured budget", threshold: 5, want: 5},
+		{name: "one attempt", threshold: 1, want: 1},
+		{name: "unset keeps the default", threshold: 0, want: int64(keepAliveAttempts)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int64
+			dialer := fakeDialer{dial: func(context.Context, string, string) (net.Conn, error) {
+				calls++
+				return nil, errors.New("dial tcp: i/o timeout")
+			}}
+
+			result := keepAliveRound(context.Background(), keepAliveClientFor(dialer), KeepAliveOptions{
+				Targets:          []KeepAliveTarget{{URL: "http://10.0.0.1/", Named: true}},
+				FailureThreshold: tt.threshold,
+			}, "")
+			if result.Category == KeepAliveOK {
+				t.Fatal("a failing target was reported as ok")
+			}
+			if calls != tt.want {
+				t.Fatalf("attempts = %d, want %d", calls, tt.want)
+			}
+		})
+	}
+}
+
 func TestKeepAliveReportsAFailureStreakAndItsRecovery(t *testing.T) {
 	shrinkRetryBudget(t)
 

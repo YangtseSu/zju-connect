@@ -471,12 +471,14 @@ func startKeepAlive(
 		return nil
 	})
 
-	log.Printf("KeepAlive: probing %d target(s) every %ds", len(targets), conf.KeepAliveInterval)
+	log.Printf("KeepAlive: probing %d target(s) every %ds, giving up on a named target after %d failed attempt(s)",
+		len(targets), conf.KeepAliveInterval, conf.KeepAliveFailureThreshold)
 	go service.KeepAlive(keepAliveCtx, resolver, dialer, service.KeepAliveOptions{
-		Targets:  targets,
-		Interval: time.Duration(conf.KeepAliveInterval) * time.Second,
-		Routing:  service.KeepAliveRouting(dialer),
-		Handler:  keepAliveHandler,
+		Targets:          targets,
+		Interval:         time.Duration(conf.KeepAliveInterval) * time.Second,
+		FailureThreshold: conf.KeepAliveFailureThreshold,
+		Routing:          service.KeepAliveRouting(dialer),
+		Handler:          keepAliveHandler,
 	})
 }
 
