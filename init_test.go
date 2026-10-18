@@ -469,6 +469,41 @@ func TestSIDTicketAndAutoReloginFlags(t *testing.T) {
 	}
 }
 
+// TestKeepAliveFailureThreshold covers the three ways the budget can arrive and
+// that the default is the built-in one.
+func TestKeepAliveFailureThreshold(t *testing.T) {
+	configFile := writeConfig(t, "keep_alive_failure_threshold = 5\n")
+
+	for _, tt := range []struct {
+		name string
+		args []string
+		env  []string
+		want int
+	}{
+		{name: "the default", want: 3},
+		{name: "the flag", args: []string{"-keep-alive-failure-threshold", "7"}, want: 7},
+		{name: "the environment", env: []string{"ZJU_CONNECT_KEEP_ALIVE_FAILURE_THRESHOLD=9"}, want: 9},
+		{name: "a config file", args: []string{"--config", configFile}, want: 5},
+		{name: "one attempt is a legitimate choice", args: []string{"-keep-alive-failure-threshold", "1"}, want: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			options, _, err := loadStartupOptions(tt.args, func() []string { return tt.env })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := options.Config.KeepAliveFailureThreshold; got != tt.want {
+				t.Fatalf("KeepAliveFailureThreshold = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeepAliveFailureThresholdFloorIsEnforced(t *testing.T) {
+	if _, _, err := loadStartupOptions([]string{"-keep-alive-failure-threshold", "0"}, func() []string { return nil }); err == nil {
+		t.Fatal("a keep-alive failure threshold below one attempt was accepted")
+	}
+}
+
 func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.toml")

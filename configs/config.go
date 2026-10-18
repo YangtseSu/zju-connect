@@ -69,6 +69,11 @@ type Config struct {
 	// AutoRelogin lets a dead session repeat the full login. Off by default: a
 	// login rotates the device token and drops other clients of the account.
 	AutoRelogin bool `koanf:"auto_relogin"`
+
+	// KeepAliveFailureThreshold is how many consecutive failed attempts a named
+	// target gets before the round gives up on it. The client's userspace netstack
+	// drops an occasional connection on its own, so one miss is not evidence.
+	KeepAliveFailureThreshold int `koanf:"keep_alive_failure_threshold"`
 }
 
 type SinglePortForwarding struct {
@@ -83,7 +88,7 @@ type SingleCustomDNS struct {
 }
 
 func Default() Config {
-	return Config{
+	cfg := Config{
 		Protocol:                "easyconnect",
 		ServerPort:              443,
 		SocksBind:               ":1080",
@@ -96,4 +101,8 @@ func Default() Config {
 		SessionRefreshInterval:  60,
 		KeepAliveInterval:       60,
 	}
+	// The client's userspace netstack drops an occasional connection by itself,
+	// so a named target gets a few attempts before the round gives up on it.
+	cfg.KeepAliveFailureThreshold = 3
+	return cfg
 }
