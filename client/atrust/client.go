@@ -534,37 +534,6 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	if c.SIDTicket != "" {
 		clientAuthData.SIDTicket = c.SIDTicket
 	}
-	if c.SIDTicket != "" {
-		clientAuthData.SIDTicket = c.SIDTicket
-	}
-
-	// The session is no longer the setup call's: it now belongs to the client, on
-	// a context that lives as long as the client does. The setup context is
-	// cancelled the moment this function returns, and a session holding it can
-	// neither renew nor notice that the session died.
-	sess.SetLifetime(c.lifecycleCtx)
-
-	c.sessionMu.Lock()
-	c.clientAuthData = clientAuthData
-	c.saveClientData = options.SaveClientData
-	c.loginMethod = options.LoginMethod
-	c.loginOptions = auth.LoginOptions{
-		DeviceID:         c.DeviceID,
-		TOTPSecret:       options.TOTPSecret,
-		ChallengeHandler: options.ChallengeHandler,
-	}
-	c.autoRelogin = options.AutoRelogin
-	c.sessionMu.Unlock()
-
-	authData := c.persistAuthData()
-	if authData == nil {
-		return nil, fmt.Errorf("failed to marshal client data")
-	}
-
-	// Take the restore ticket now, while the session is known to be alive: the
-	// exchange needs a live session, so it cannot be the thing the ladder does
-	// after the session died.
-	c.prepareRestoreTicket(setupCtx, sess)
 
 	// The session is no longer the setup call's: it now belongs to the client, on
 	// a context that lives as long as the client does. The setup context is
@@ -599,7 +568,7 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 		return nil, err
 	}
 
-	log.DebugPrintf("SID: %s, DeviceID: %s, ConnectionID: %s, SignKey: %s", c.SID, c.DeviceID, c.ConnectionID, c.SignKey)
+	c.debugSessionMaterial()
 
 	c.BestNodes = getBestNodes(setupCtx, c.NodeGroups, c.underlayDialer.DialContext, c.tlsKeyLogWriter)
 	if err := setupCtx.Err(); err != nil {
@@ -641,6 +610,13 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	}
 
 	return authData, nil
+}
+
+// debugSessionMaterial prints the identifiers a debug log needs, with the sign
+// key redacted: it is a credential.
+func (c *Client) debugSessionMaterial() {
+	log.DebugPrintf("SID: %s, DeviceID: %s, ConnectionID: %s, SignKey: %s",
+		c.SID, c.DeviceID, c.ConnectionID, log.Redact(c.SignKey))
 }
 
 func newUnderlayDialer(bindInterface string, autoDetectInterface bool, localDNSServer string) (*underlay.Dialer, error) {

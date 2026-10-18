@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sync"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"

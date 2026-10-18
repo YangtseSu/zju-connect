@@ -60,9 +60,6 @@ func TestSessionRefreshPublishesAndPersists(t *testing.T) {
 	if saved.DeviceID != "device" || len(saved.ServerVersionInfo) == 0 || saved.Cookies[0].Value != "new" {
 		t.Fatalf("saved = %+v", saved)
 	}
-	if saved.Ticket != "ticket-new" {
-		t.Fatalf("saved ticket = %q, want the renewal ticket to survive the round trip", saved.Ticket)
-	}
 	if sid, err := c.sessionSID(); sid != "new" || err != nil {
 		t.Fatalf("retained SID = %q, %v", sid, err)
 	}

@@ -75,7 +75,6 @@ func (s *Stack) AddRoute(target string) error {
 		return err
 	}
 
-	s.recordRoute(target)
 	return nil
 }
 

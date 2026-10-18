@@ -44,7 +44,6 @@ const (
 	collectionUDPPortForwarding collectionKey = "udp_port_forwarding"
 	collectionCustomDNS         collectionKey = "custom_dns"
 	collectionProxyDomain       collectionKey = "custom_proxy_domain"
-	collectionKeepAliveURL      collectionKey = "keep_alive_urls"
 )
 
 type collectionSpec struct {
@@ -52,17 +51,13 @@ type collectionSpec struct {
 	FlagName string
 	EnvName  string
 	Help     string
-	// Repeatable registers a flag that may be given more than once, on top of the
-	// comma-separated form every collection flag accepts.
-	Repeatable bool
 }
 
 var collectionSpecs = []collectionSpec{
-	{collectionTCPPortForwarding, "tcp-port-forwarding", "TCP_PORT_FORWARDING", "TCP port forwarding", false},
-	{collectionUDPPortForwarding, "udp-port-forwarding", "UDP_PORT_FORWARDING", "UDP port forwarding", false},
-	{collectionCustomDNS, "custom-dns", "CUSTOM_DNS", "Custom DNS lookup entries", false},
-	{collectionProxyDomain, "custom-proxy-domain", "CUSTOM_PROXY_DOMAIN", "Domains which force use of the RVPN proxy", false},
-	{collectionKeepAliveURL, "keep-alive-url", "KEEP_ALIVE_URL", "Keep alive URLs, comma separated or repeated", true},
+	{collectionTCPPortForwarding, "tcp-port-forwarding", "TCP_PORT_FORWARDING", "TCP port forwarding"},
+	{collectionUDPPortForwarding, "udp-port-forwarding", "UDP_PORT_FORWARDING", "UDP port forwarding"},
+	{collectionCustomDNS, "custom-dns", "CUSTOM_DNS", "Custom DNS lookup entries"},
+	{collectionProxyDomain, "custom-proxy-domain", "CUSTOM_PROXY_DOMAIN", "Domains which force use of the RVPN proxy"},
 }
 
 type configAlias struct {
@@ -148,10 +143,6 @@ func newFlagSet(defaults configs.Config) *pflag.FlagSet {
 	flags.Bool("auto-relogin", defaults.AutoRelogin, "Repeat a full aTrust login when a session dies (rotates the device token)")
 
 	for _, spec := range collectionSpecs {
-		if spec.Repeatable {
-			flags.StringArray(spec.FlagName, nil, spec.Help)
-			continue
-		}
 		flags.String(spec.FlagName, "", spec.Help)
 	}
 
@@ -388,17 +379,6 @@ func collectionValuesFromFlags(flags *pflag.FlagSet) collectionValues {
 	values := make(collectionValues, len(collectionSpecs))
 	for _, spec := range collectionSpecs {
 		flag := flags.Lookup(spec.FlagName)
-		if spec.Repeatable {
-			if slice, ok := flag.Value.(pflag.SliceValue); ok {
-				// GetSlice, not flag.Value.String: the latter renders the slice as
-				// "[a b]", which is not a value any parser here accepts.
-				values[spec.Key] = collectionValue{
-					Value: strings.Join(slice.GetSlice(), ","),
-					Set:   flag.Changed,
-				}
-				continue
-			}
-		}
 		values[spec.Key] = collectionValue{Value: flag.Value.String(), Set: flag.Changed}
 	}
 	return values
@@ -490,26 +470,6 @@ func parseProxyDomains(value string) []string {
 	return strings.Split(value, ",")
 }
 
-// parseKeepAliveURLs splits the comma-separated flag value, drops empty entries
-// and keeps the order, so a target repeated by accident is probed once.
-func parseKeepAliveURLs(value string) []string {
-	if value == "" {
-		return nil
-	}
-
-	seen := make(map[string]bool)
-	var urls []string
-	for _, entry := range strings.Split(value, ",") {
-		trimmed := strings.TrimSpace(entry)
-		if trimmed == "" || seen[trimmed] {
-			continue
-		}
-		seen[trimmed] = true
-		urls = append(urls, trimmed)
-	}
-	return urls
-}
-
 func zjuServerWorkaround(cfg *configs.Config) {
 	if cfg.Protocol == "atrust" && cfg.ServerAddress == "rvpn.zju.edu.cn" {
 		fmt.Println("ZJU Connect: set default aTrust server address to vpn.zju.edu.cn")
@@ -521,6 +481,11 @@ func zjuServerWorkaround(cfg *configs.Config) {
 }
 
 func validateConfig(cfg configs.Config) error {
+	if cfg.SessionRefreshInterval != 0 && cfg.SessionRefreshInterval < 30 {
+		// 0 disables the renewal loop on purpose; anything else below the floor
+		// is a mistake that would hammer the portal.
+		return fmt.Errorf("ZJU Connect: session-refresh-interval must be 0 (disabled) or at least 30 seconds")
+	}
 	if cfg.KeepAliveInterval < 10 {
 		return fmt.Errorf("ZJU Connect: keep-alive-interval must be at least 10 seconds")
 	}

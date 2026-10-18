@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
-	"slices"
 	"testing"
 
 	"github.com/mythologyli/zju-connect/client"
@@ -17,29 +15,6 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
-
-func TestStackRoutes(t *testing.T) {
-	s := &Stack{}
-	s.recordRoute("10.0.0.10/32")
-	s.recordRoute("10.0.0.0/24")
-	s.recordRoute("10.0.0.10/32")
-	s.recordRoute("not a prefix")
-
-	want := []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.10/32"),
-		netip.MustParsePrefix("10.0.0.0/24"),
-	}
-	routes := s.Routes()
-	if !slices.Equal(routes, want) {
-		t.Fatalf("Routes() = %v, want %v", routes, want)
-	}
-
-	// The keep-alive must not be able to change what the tunnel installed.
-	routes[0] = netip.MustParsePrefix("192.0.2.1/32")
-	if !slices.Equal(s.Routes(), want) {
-		t.Fatalf("Routes() = %v after the caller modified its copy, want %v", s.Routes(), want)
-	}
-}
 
 type recordingNetworkDispatcher struct {
 	packet *stack.PacketBuffer

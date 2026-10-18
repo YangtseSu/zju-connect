@@ -62,7 +62,6 @@ func (s *Stack) AddRoute(target string) error {
 	s.endpoint.ipSetBuilder.AddPrefix(netaddr.MustParseIPPrefix(target))
 	s.endpoint.ipSet, _ = s.endpoint.ipSetBuilder.IPSet()
 
-	s.recordRoute(target)
 	return nil
 }
 
