@@ -10,7 +10,7 @@ import (
 
 func TestParseResourcePreservesMultipleRulesForDomain(t *testing.T) {
 	var policy ClientResource
-	appInfo := struct{ Apps []resourceApp }{}
+	appInfo := resourceAppGroup{}
 	for _, rule := range []struct{ id, group, port string }{
 		{id: "https-app", group: "https-group", port: "443"},
 		{id: "http-app", group: "http-group", port: "80"},
@@ -97,7 +97,7 @@ func TestParseResourceDoesNotOverrideTCPTunnelZeroRTT(t *testing.T) {
 
 func TestParseResourcePreservesTCPPrefL3ForDomainAndResolvedIP(t *testing.T) {
 	var policy ClientResource
-	policy.Data.AppList.Data.AppInfo = append(policy.Data.AppList.Data.AppInfo, struct{ Apps []resourceApp }{
+	policy.Data.AppList.Data.AppInfo = append(policy.Data.AppList.Data.AppInfo, resourceAppGroup{
 		Apps: []resourceApp{{
 			ID: "l3-app", NodeGroupID: "l3-group", AccessModel: "L3VPN", EnableTCPPrefL3: true,
 			AddressList: []resourceAddress{{Protocol: "tcp", Port: "443", Host: "internal.example", IP: []string{"10.0.0.42"}}},
@@ -136,7 +136,7 @@ func TestDomainTCPSelectionPrefersTCPTunnelResource(t *testing.T) {
 
 func TestParseResourceIgnoresUnsupportedAccessModel(t *testing.T) {
 	var policy ClientResource
-	policy.Data.AppList.Data.AppInfo = append(policy.Data.AppList.Data.AppInfo, struct{ Apps []resourceApp }{
+	policy.Data.AppList.Data.AppInfo = append(policy.Data.AppList.Data.AppInfo, resourceAppGroup{
 		Apps: []resourceApp{{
 			ID: "web-app", AccessModel: "WEB", AddressList: []resourceAddress{{Protocol: "tcp", Port: "443", Host: "10.0.0.42"}},
 		}},
@@ -151,5 +151,53 @@ func TestParseResourceIgnoresUnsupportedAccessModel(t *testing.T) {
 	}
 	if _, ok := c.resourceIndex.Match(net.ParseIP("10.0.0.42"), "tcp", 443); ok {
 		t.Fatal("unsupported access model unexpectedly became an L3VPN resource")
+	}
+}
+
+func TestParseResourcePreservesAppNamesAndLaunchHints(t *testing.T) {
+	policy := []byte(`{"data":{"appList":{"data":{"appInfo":[{"name":"Portal","apps":[` +
+		`{"ID":"wiki","Name":"Intranet Wiki","AccessModel":"L3VPN","accessAddress":"https://wiki.example.com","openModel":{"model":"web"},"webRelativeDomainList":["wiki2.example.com"],"AddressList":[{"Protocol":"tcp","Port":"443","Host":"wiki.example.com"}]},` +
+		`{"ID":"shell","Name":"Shell","AccessModel":"L3VPN","AddressList":[{"Protocol":"tcp","Port":"22","Host":"192.0.2.10"}]},` +
+		`{"ID":"web","Name":"Web","AccessModel":"web","webRelativeDomainList":["web.example.com"]}` +
+		`]}]}}}}`)
+
+	c := &Client{}
+	if err := c.parseResource(policy); err != nil {
+		t.Fatalf("parseResource() error = %v", err)
+	}
+
+	apps, err := c.Apps()
+	if err != nil {
+		t.Fatalf("Apps() error = %v", err)
+	}
+	if len(apps) != 3 {
+		t.Fatalf("apps = %#v, want three entries", apps)
+	}
+
+	wiki := apps[0]
+	if wiki.ID != "wiki" || wiki.Name != "Intranet Wiki" || wiki.Group != "Portal" {
+		t.Fatalf("wiki = %#v, want the portal name and group", wiki)
+	}
+	if wiki.LaunchURL != "https://wiki.example.com" || wiki.LaunchMethod != "web" {
+		t.Fatalf("wiki launch = (%q, %q)", wiki.LaunchURL, wiki.LaunchMethod)
+	}
+	if len(wiki.WebDomains) != 1 || wiki.WebDomains[0] != "wiki2.example.com" {
+		t.Fatalf("wiki web domains = %#v", wiki.WebDomains)
+	}
+
+	shell := apps[1]
+	if shell.LaunchURL != "" {
+		t.Fatalf("shell launch = %q, want none", shell.LaunchURL)
+	}
+
+	if web := apps[2]; web.LaunchURL != "web.example.com" {
+		t.Fatalf("web launch = %q, want the first relative web domain", web.LaunchURL)
+	}
+}
+
+func TestAppsUnavailableBeforeParse(t *testing.T) {
+	c := &Client{}
+	if _, err := c.Apps(); err == nil {
+		t.Fatal("Apps() succeeded before a resource list was parsed")
 	}
 }

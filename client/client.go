@@ -32,6 +32,18 @@ type IPResource struct {
 	EnableTCPPrefL3 bool
 }
 
+// App is one application the portal grants. The address rules reference it by
+// AppID; Name and the launch hints come from the portal's own application
+// list, which is why they are not part of IPResource or DomainResource.
+type App struct {
+	ID           string
+	Name         string
+	Group        string
+	LaunchURL    string
+	LaunchMethod string
+	WebDomains   []string
+}
+
 type DomainResource struct {
 	PortMin         int
 	PortMax         int

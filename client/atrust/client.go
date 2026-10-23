@@ -86,6 +86,7 @@ type Client struct {
 	lastRecovery   time.Time
 
 	serverAddress   string
+	apps            []client.App
 	ipResources     []client.IPResource
 	resourceIndex   *ipresource.Index
 	domainResources client.DomainResources
@@ -210,6 +211,16 @@ func (c *Client) IPSet() (*netaddr.IPSet, error) {
 	}
 
 	return c.ipSet, nil
+}
+
+// Apps returns the applications the portal granted this account, with the
+// display names and launch hints the portal supplies.
+func (c *Client) Apps() ([]client.App, error) {
+	if c.apps == nil {
+		return nil, errors.New("applications not available")
+	}
+
+	return c.apps, nil
 }
 
 func (c *Client) IPResources() ([]client.IPResource, error) {

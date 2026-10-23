@@ -16,9 +16,7 @@ type ClientResource struct {
 	Data struct {
 		AppList struct {
 			Data struct {
-				AppInfo []struct {
-					Apps []resourceApp
-				}
+				AppInfo []resourceAppGroup
 
 				Config struct {
 					NodeGroupConf struct {
@@ -63,13 +61,30 @@ type ClientResource struct {
 	}
 }
 
+// resourceAppGroup is one group in the portal's application list. The group
+// carries the display name its applications share.
+type resourceAppGroup struct {
+	Name string
+	Apps []resourceApp
+}
+
 type resourceApp struct {
 	ID              string
+	Name            string
 	NodeGroupID     string
 	AccessModel     string
 	EnableTCPPrefL3 bool
 	AddrPretend     any `json:"addrPretend"`
-	AddressList     []resourceAddress
+	// AccessAddress is the portal's launch address for the application.
+	AccessAddress string
+	// OpenModel describes how the portal would open it, e.g. "web".
+	OpenModel struct {
+		Model string
+	}
+	// WebRelativeDomainList lists web addresses the portal offers for the
+	// application; the first one is a launch hint when AccessAddress is empty.
+	WebRelativeDomainList []string
+	AddressList           []resourceAddress
 }
 
 type resourceAddress struct {
@@ -99,9 +114,23 @@ func (c *Client) parseResource(resource []byte) error {
 	c.ipResources = make([]client.IPResource, 0)
 	c.domainResources = make(client.DomainResources)
 	c.dnsResource = make(map[string][]net.IP)
+	c.apps = make([]client.App, 0)
 
-	for _, app := range clientResource.Data.AppList.Data.AppInfo {
-		for _, appItem := range app.Apps {
+	for _, group := range clientResource.Data.AppList.Data.AppInfo {
+		for _, appItem := range group.Apps {
+			launch := appItem.AccessAddress
+			if launch == "" && len(appItem.WebRelativeDomainList) > 0 {
+				launch = appItem.WebRelativeDomainList[0]
+			}
+			c.apps = append(c.apps, client.App{
+				ID:           appItem.ID,
+				Name:         appItem.Name,
+				Group:        group.Name,
+				LaunchURL:    launch,
+				LaunchMethod: appItem.OpenModel.Model,
+				WebDomains:   append([]string(nil), appItem.WebRelativeDomainList...),
+			})
+
 			if appItem.AccessModel != "L3VPN" {
 				log.DebugPrintf("Ignore unsupported aTrust access model %q for app %s", appItem.AccessModel, appItem.ID)
 				continue
