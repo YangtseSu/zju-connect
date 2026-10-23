@@ -51,7 +51,12 @@ type SetupOptions struct {
 	// AutoRelogin lets the recovery ladder repeat a full login when a renewal and
 	// a restore both failed. It is off by default: a full login rotates the device
 	// token and drops other clients of the same account.
-	AutoRelogin    bool
+	AutoRelogin bool
+	// OnSessionState observes what the session maintenance learns: online,
+	// restoring, or reauthentication required. A GUI can mirror that state
+	// instead of matching the log lines. It is called from the goroutine that
+	// changed the state and must not block.
+	OnSessionState func(state SessionState, reason string)
 	SaveClientData func([]byte) error
 }
 
@@ -82,6 +87,7 @@ type Client struct {
 	autoRelogin    bool
 	reloginBlocked bool
 	sessionState   SessionState
+	onSessionState func(state SessionState, reason string)
 	recovering     bool
 	lastRecovery   time.Time
 
@@ -562,6 +568,7 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 		ChallengeHandler: options.ChallengeHandler,
 	}
 	c.autoRelogin = options.AutoRelogin
+	c.onSessionState = options.OnSessionState
 	c.sessionMu.Unlock()
 
 	authData := c.persistAuthData()

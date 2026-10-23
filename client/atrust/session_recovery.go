@@ -66,11 +66,15 @@ func (c *Client) setSessionState(state SessionState, reason string, code int64) 
 		return
 	}
 	c.sessionState = state
+	observer := c.onSessionState
 	c.sessionMu.Unlock()
 
 	log.Printf("aTrust session state: %s reason=%s code=%d", state, reason, code)
 	if state == SessionReloginRequired {
 		log.Printf("aTrust session requires reauthentication (code=%d)", code)
+	}
+	if observer != nil {
+		observer(state, reason)
 	}
 }
 

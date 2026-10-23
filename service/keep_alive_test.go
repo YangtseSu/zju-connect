@@ -50,15 +50,33 @@ func TestKeepAliveRoundUsesTheFirstAnsweringTarget(t *testing.T) {
 	}))
 	defer second.Close()
 
+	results := make([]KeepAliveResult, 0, 2)
 	target, ok := keepAliveRound(context.Background(), keepAliveClientFor(fakeDialer{}), []KeepAliveTarget{
 		{URL: first.URL, Named: true},
 		{URL: second.URL, Named: true},
-	}, "")
+	}, "", func(result KeepAliveResult) {
+		results = append(results, result)
+	})
 	if !ok || target != second.URL {
 		t.Fatalf("round = (%q, %t), want (%q, true)", target, ok, second.URL)
 	}
 	if got := firstRequests.Load(); got != 1 {
 		t.Fatalf("first target requests = %d, want 1 (no within-round retry)", got)
+	}
+
+	// Every attempt is reported, not only the one that won, so a status line
+	// can say why it moved to the next target.
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want one per attempt", results)
+	}
+	if results[0].Target != first.URL || results[0].OK || results[0].StatusCode != http.StatusInternalServerError {
+		t.Fatalf("first result = %+v, want a reported 500", results[0])
+	}
+	if results[1].Target != second.URL || !results[1].OK || results[1].StatusCode != http.StatusOK {
+		t.Fatalf("second result = %+v, want a reported 200", results[1])
+	}
+	if results[0].At.IsZero() || results[1].At.Before(results[0].At) {
+		t.Fatalf("result timestamps = (%v, %v), want increasing", results[0].At, results[1].At)
 	}
 }
 
@@ -70,14 +88,20 @@ func TestKeepAliveRoundReportsWhenNoTargetAnswers(t *testing.T) {
 	}))
 	defer server.Close()
 
+	var results []KeepAliveResult
 	target, ok := keepAliveRound(context.Background(), keepAliveClientFor(fakeDialer{}), []KeepAliveTarget{
 		{URL: server.URL, Named: true},
-	}, "")
+	}, "", func(result KeepAliveResult) {
+		results = append(results, result)
+	})
 	if ok || target != "" {
 		t.Fatalf("round = (%q, %t), want no target", target, ok)
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want 1", got)
+	}
+	if len(results) != 1 || results[0].OK || results[0].StatusCode != http.StatusNotFound {
+		t.Fatalf("results = %+v, want one reported 404", results)
 	}
 }
 
@@ -143,7 +167,10 @@ func TestKeepAliveFallsBackToRemoteDNSWithALabel(t *testing.T) {
 	t.Cleanup(func() { stdlog.SetOutput(oldOutput) })
 
 	// A zero resolver has no remote resolvers, so the fallback logs and returns.
-	KeepAlive(context.Background(), &resolve.Resolver{}, fakeDialer{}, KeepAliveOptions{})
+	var results []KeepAliveResult
+	KeepAlive(context.Background(), &resolve.Resolver{}, fakeDialer{}, KeepAliveOptions{
+		OnResult: func(result KeepAliveResult) { results = append(results, result) },
+	})
 
 	got := output.String()
 	if !strings.Contains(got, "not application traffic") {
@@ -151,6 +178,9 @@ func TestKeepAliveFallsBackToRemoteDNSWithALabel(t *testing.T) {
 	}
 	if !strings.Contains(got, "No remote resolver available") {
 		t.Fatalf("fallback log does not explain the missing resolver: %q", got)
+	}
+	if len(results) != 1 || results[0].OK || !results[0].Fallback || results[0].Err == nil {
+		t.Fatalf("fallback results = %+v, want one labelled failure", results)
 	}
 }
 

@@ -34,12 +34,39 @@ type KeepAliveDialer interface {
 	Dial(ctx context.Context, network, address string) (net.Conn, error)
 }
 
+// KeepAliveResult is the outcome of one probe. A caller that wants to show
+// what the last round learned (a tray tooltip, a status line) reads this
+// instead of matching the log lines the loop writes.
+type KeepAliveResult struct {
+	// Target is the URL that was probed, or the name of the remote-DNS
+	// fallback probe.
+	Target string
+	// Named reports whether Target came from the user's configured list.
+	Named bool
+	// StatusCode is the HTTP answer, zero for a transport error or a DNS probe.
+	StatusCode int
+	// OK reports whether the probe counted: a 2xx/3xx HTTP answer, or a
+	// successful name lookup in the fallback.
+	OK bool
+	// Err is the transport or lookup error, nil when the probe got an answer.
+	Err error
+	// Fallback marks the remote-DNS probe, which is not application traffic
+	// and does not hold a session open.
+	Fallback bool
+	// At is when the probe finished.
+	At time.Time
+}
+
 // KeepAliveOptions carries what the loop needs from its caller.
 type KeepAliveOptions struct {
 	// Targets to probe, in preference order.
 	Targets []KeepAliveTarget
 	// Interval between rounds.
 	Interval time.Duration
+	// OnResult observes every probe, including the remote-DNS fallback. It is
+	// called from the keep-alive goroutine and must not block; nil discards
+	// the results.
+	OnResult func(KeepAliveResult)
 }
 
 // KeepAlive keeps the session open by sending real application traffic through
@@ -49,11 +76,16 @@ type KeepAliveOptions struct {
 // With no target at all it falls back to the older remote-DNS probe and says so,
 // because a name lookup is not application traffic and does not hold the session.
 func KeepAlive(ctx context.Context, resolver *resolve.Resolver, dialer KeepAliveDialer, options KeepAliveOptions) {
+	report := options.OnResult
+	if report == nil {
+		report = func(KeepAliveResult) {}
+	}
+
 	if len(options.Targets) == 0 {
 		log.Println("KeepAlive: no application target, falling back to the remote-DNS probe " +
 			"(this is not application traffic and does not hold the session open; " +
 			"pass -keep-alive-url or grant the account an HTTP application)")
-		keepAliveWithRemoteDNS(ctx, resolver, options.Interval)
+		keepAliveWithRemoteDNS(ctx, resolver, options.Interval, report)
 		return
 	}
 
@@ -71,7 +103,7 @@ func KeepAlive(ctx context.Context, resolver *resolve.Resolver, dialer KeepAlive
 
 	active := ""
 	for {
-		if target, ok := keepAliveRound(ctx, client, options.Targets, active); ok {
+		if target, ok := keepAliveRound(ctx, client, options.Targets, active, report); ok {
 			active = target
 		}
 		if !sleep(ctx, options.Interval) {
@@ -88,13 +120,14 @@ func keepAliveRound(
 	client *http.Client,
 	targets []KeepAliveTarget,
 	active string,
+	report func(KeepAliveResult),
 ) (string, bool) {
 	for _, target := range keepAliveOrder(targets, active) {
 		timeout := candidateKeepAliveTimeout
 		if target.Named {
 			timeout = keepAliveRequestTimeout
 		}
-		if keepAliveAttempt(ctx, client, target, timeout) {
+		if keepAliveAttempt(ctx, client, target, timeout, report) {
 			return target.URL, true
 		}
 	}
@@ -106,29 +139,44 @@ func keepAliveAttempt(
 	client *http.Client,
 	target KeepAliveTarget,
 	timeout time.Duration,
+	report func(KeepAliveResult),
 ) bool {
+	result := KeepAliveResult{Target: target.URL, Named: target.Named}
+	finish := func() {
+		result.At = time.Now()
+		report(result)
+	}
+
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, target.URL, nil)
 	if err != nil {
+		result.Err = err
+		finish()
 		log.Printf("KeepAlive: target=%s err=%v", target.URL, err)
 		return false
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
+		result.Err = err
+		finish()
 		log.Printf("KeepAlive: target=%s err=%v", target.URL, err)
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, keepAliveDrainLimit+1))
 
+	result.StatusCode = resp.StatusCode
 	if resp.StatusCode >= http.StatusBadRequest {
+		finish()
 		log.Printf("KeepAlive: target=%s status=%d", target.URL, resp.StatusCode)
 		return false
 	}
 
+	result.OK = true
+	finish()
 	log.Printf("KeepAlive: OK status=%d target=%s", resp.StatusCode, target.URL)
 	return true
 }
@@ -147,7 +195,22 @@ func sleep(ctx context.Context, duration time.Duration) bool {
 // keepAliveWithRemoteDNS is the fallback when no application target exists. It
 // keeps the historical behaviour and its log lines; it is deliberately labelled
 // as not being application traffic.
-func keepAliveWithRemoteDNS(ctx context.Context, resolver *resolve.Resolver, interval time.Duration) {
+func keepAliveWithRemoteDNS(
+	ctx context.Context,
+	resolver *resolve.Resolver,
+	interval time.Duration,
+	report func(KeepAliveResult),
+) {
+	reportFallback := func(protocol string, err error) {
+		report(KeepAliveResult{
+			Target:   "www.baidu.com (" + protocol + ")",
+			OK:       err == nil,
+			Err:      err,
+			Fallback: true,
+			At:       time.Now(),
+		})
+	}
+
 	remoteUDPResolver, err := resolver.RemoteUDPResolver()
 	if err != nil {
 		log.Printf("KeepAlive: %s", err)
@@ -160,6 +223,12 @@ func keepAliveWithRemoteDNS(ctx context.Context, resolver *resolve.Resolver, int
 
 	if remoteUDPResolver == nil && remoteTCPResolver == nil {
 		log.Printf("KeepAlive: No remote resolver available")
+		report(KeepAliveResult{
+			Target:   "remote DNS",
+			Err:      errors.New("no remote resolver available"),
+			Fallback: true,
+			At:       time.Now(),
+		})
 		return
 	}
 
@@ -177,6 +246,7 @@ func keepAliveWithRemoteDNS(ctx context.Context, resolver *resolve.Resolver, int
 			} else {
 				log.Printf("KeepAlive using UDP: OK")
 			}
+			reportFallback("UDP", err)
 		}
 
 		if useTCP && remoteTCPResolver != nil {
@@ -188,6 +258,7 @@ func keepAliveWithRemoteDNS(ctx context.Context, resolver *resolve.Resolver, int
 			} else {
 				log.Printf("KeepAlive using TCP: OK")
 			}
+			reportFallback("TCP", err)
 		}
 		cancel()
 

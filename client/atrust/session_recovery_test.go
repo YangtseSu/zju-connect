@@ -638,3 +638,26 @@ func TestSessionCodeFromError(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionStateChangesReachTheObserver: the callback is the contract a GUI
+// follows instead of matching log lines. It fires once per real change, carries
+// the state and the reason, and does not fire for a repeated state.
+func TestSessionStateChangesReachTheObserver(t *testing.T) {
+	c := NewClient(ClientOptions{})
+	t.Cleanup(c.Close)
+
+	var seen []string
+	c.onSessionState = func(state SessionState, reason string) {
+		seen = append(seen, string(state)+":"+reason)
+	}
+
+	c.setSessionState(SessionOnline, "logged in", 0)
+	c.setSessionState(SessionOnline, "logged in again", 0)
+	c.setSessionState(SessionReloginRequired, "session refresh", 75500002)
+	c.setSessionState(SessionReloginRequired, "session refresh again", 75500002)
+
+	want := []string{"online:logged in", "relogin-required:session refresh"}
+	if strings.Join(seen, "|") != strings.Join(want, "|") {
+		t.Fatalf("observed states = %v, want %v", seen, want)
+	}
+}
