@@ -324,6 +324,9 @@ type authServiceInfo struct {
 type authStepData struct {
 	NextService     string            `json:"nextService"`
 	NextServiceList []authServiceInfo `json:"nextServiceList"`
+	// The forced password change is announced here by the live gateway, next
+	// to (or instead of) in the password answer.
+	passwordChangeData
 }
 
 type authStep struct {
@@ -419,6 +422,7 @@ func (s *Session) authCheck() (authStep, error) {
 		return authStep{}, fmt.Errorf("authCheck failed with code %d: %s", ac.Code, ac.Message)
 	}
 
+	s.capturePasswordChange(ac.Data.NextService, ac.Data.passwordChangeData, s.loginUsername(), s.loginDomain)
 	return authStepFromData(ac.Data), nil
 }
 

@@ -259,6 +259,68 @@ func hasRepeatedRun(password string, run int) bool {
 	return false
 }
 
+// passwordChangeData is the forced-change payload a portal answer carries
+// next to nextService:"auth/modifyPwd". It appears in the password answer and
+// again in the authCheck answer, which is where the live gateway announces the
+// change.
+type passwordChangeData struct {
+	ModifyPwdCode    flexibleInt     `json:"modifyPwdCode"`
+	ModifyPwdMessage string          `json:"modifyPwdMessage"`
+	PswStrategy      json.RawMessage `json:"pswStrategy"`
+	Username         string          `json:"username"`
+	Domain           string          `json:"domain"`
+	PwdRulePrompt    string          `json:"pwdRulePrompt"`
+}
+
+// passwordChangeFromData builds the challenge the window shows. The fallbacks
+// are the account the login used, because a portal may omit the pair in the
+// authCheck answer.
+func passwordChangeFromData(data passwordChangeData, username, domain string) PasswordChangeChallenge {
+	challenge := PasswordChangeChallenge{
+		Code:         int(data.ModifyPwdCode),
+		Message:      data.ModifyPwdMessage,
+		Username:     data.Username,
+		Domain:       data.Domain,
+		Prompt:       data.PwdRulePrompt,
+		Strategy:     decodePasswordStrategy(data.PswStrategy),
+		CanSkip:      int(data.ModifyPwdCode) == codePasswordChangeSkippable,
+		ShowAccount:  int(data.ModifyPwdCode) == codePasswordAccountRename || int(data.ModifyPwdCode) == codePasswordChangeSkippable,
+		CustomizePwd: data.Domain != "" && data.Domain != "local",
+	}
+	if challenge.Username == "" {
+		challenge.Username = username
+	}
+	if challenge.Domain == "" {
+		challenge.Domain = domain
+	}
+	if challenge.Username == "" && challenge.Domain == "" {
+		challenge.CustomizePwd = false
+	}
+	return challenge
+}
+
+// loginUsername is the account part of the name the password login sent.
+func (s *Session) loginUsername() string {
+	if at := strings.LastIndex(s.username, "@"); at >= 0 {
+		return s.username[:at]
+	}
+	return s.username
+}
+
+// capturePasswordChange stores the demand when the answer announced one. The
+// login and the authCheck answer both go through here: the live gateway names
+// the change in authCheck, not in the password answer, and the code there is
+// what brings the account field and the skip offer.
+func (s *Session) capturePasswordChange(nextService string, data passwordChangeData, username, domain string) {
+	if nextService != "auth/modifyPwd" {
+		return
+	}
+	challenge := passwordChangeFromData(data, username, domain)
+	s.stateMu.Lock()
+	s.passwordChange = &challenge
+	s.stateMu.Unlock()
+}
+
 // PasswordChangeChallenge is the gateway's forced password change: the account
 // has to choose a new password before the login can finish.
 type PasswordChangeChallenge struct {

@@ -140,6 +140,9 @@ type Session struct {
 	passwordChange        *PasswordChangeChallenge
 	passwordChangeHandler PasswordChangeHandler
 	onPasswordChanged     func(newPassword string)
+	// loginDomain is the domain of the method this login uses, the fallback
+	// for a challenge that does not repeat username/domain.
+	loginDomain string
 }
 
 func NewSession(server string, tlsKeyLogWriter io.Writer, dialContext ...client.DialContextFunc) *Session {
@@ -460,6 +463,9 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 			foundAuthInfo = &authInfo
 			break
 		}
+	}
+	if foundAuthInfo != nil {
+		s.loginDomain = foundAuthInfo.LoginDomain
 	}
 	if foundAuthInfo == nil {
 		log.Printf("Available authentication methods: %+v", authInfoList)

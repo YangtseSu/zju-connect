@@ -95,16 +95,11 @@ func (s *Session) pswImpl(username, password, loginDomain, graphCheckCode string
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			Ticket               string          `json:"ticket"`
-			GraphCheckCodeEnable int             `json:"graphCheckCodeEnable"`
-			NextService          string          `json:"nextService"`
-			AntiReplayRand       string          `json:"antiReplayRand"`
-			ModifyPwdCode        flexibleInt     `json:"modifyPwdCode"`
-			ModifyPwdMessage     string          `json:"modifyPwdMessage"`
-			PswStrategy          json.RawMessage `json:"pswStrategy"`
-			Username             string          `json:"username"`
-			Domain               string          `json:"domain"`
-			PwdRulePrompt        string          `json:"pwdRulePrompt"`
+			Ticket               string `json:"ticket"`
+			GraphCheckCodeEnable int    `json:"graphCheckCodeEnable"`
+			NextService          string `json:"nextService"`
+			AntiReplayRand       string `json:"antiReplayRand"`
+			passwordChangeData
 		} `json:"data"`
 	}
 	err = json.Unmarshal(body, &re)
@@ -124,28 +119,7 @@ func (s *Session) pswImpl(username, password, loginDomain, graphCheckCode string
 	}
 	s.ticket = re.Data.Ticket
 
-	if re.Data.NextService == "auth/modifyPwd" {
-		challenge := PasswordChangeChallenge{
-			Code:         int(re.Data.ModifyPwdCode),
-			Message:      re.Data.ModifyPwdMessage,
-			Username:     re.Data.Username,
-			Domain:       re.Data.Domain,
-			Prompt:       re.Data.PwdRulePrompt,
-			Strategy:     decodePasswordStrategy(re.Data.PswStrategy),
-			CanSkip:      int(re.Data.ModifyPwdCode) == codePasswordChangeSkippable,
-			ShowAccount:  int(re.Data.ModifyPwdCode) == codePasswordAccountRename || int(re.Data.ModifyPwdCode) == codePasswordChangeSkippable,
-			CustomizePwd: re.Data.Domain != "" && re.Data.Domain != "local",
-		}
-		if challenge.Username == "" {
-			challenge.Username = username
-		}
-		if challenge.Domain == "" {
-			challenge.Domain = loginDomain
-		}
-		s.stateMu.Lock()
-		s.passwordChange = &challenge
-		s.stateMu.Unlock()
-	}
+	s.capturePasswordChange(re.Data.NextService, re.Data.passwordChangeData, username, loginDomain)
 
 	s.nextService = re.Data.NextService
 	// The server issues a fresh antiReplayRand; the challenge token must use it (stale -> 75500000).
