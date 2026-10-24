@@ -95,10 +95,16 @@ func (s *Session) pswImpl(username, password, loginDomain, graphCheckCode string
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			Ticket               string `json:"ticket"`
-			GraphCheckCodeEnable int    `json:"graphCheckCodeEnable"`
-			NextService          string `json:"nextService"`
-			AntiReplayRand       string `json:"antiReplayRand"`
+			Ticket               string          `json:"ticket"`
+			GraphCheckCodeEnable int             `json:"graphCheckCodeEnable"`
+			NextService          string          `json:"nextService"`
+			AntiReplayRand       string          `json:"antiReplayRand"`
+			ModifyPwdCode        flexibleInt     `json:"modifyPwdCode"`
+			ModifyPwdMessage     string          `json:"modifyPwdMessage"`
+			PswStrategy          json.RawMessage `json:"pswStrategy"`
+			Username             string          `json:"username"`
+			Domain               string          `json:"domain"`
+			PwdRulePrompt        string          `json:"pwdRulePrompt"`
 		} `json:"data"`
 	}
 	err = json.Unmarshal(body, &re)
@@ -113,10 +119,33 @@ func (s *Session) pswImpl(username, password, loginDomain, graphCheckCode string
 	}
 	log.DebugPrintf("Parsed psw: %+v", re)
 
-	if re.Data.Ticket == "" && re.Data.GraphCheckCodeEnable == 0 {
+	if re.Data.Ticket == "" && re.Data.GraphCheckCodeEnable == 0 && re.Data.NextService != "auth/modifyPwd" {
 		return 0, fmt.Errorf("password authentication succeeded without a ticket")
 	}
 	s.ticket = re.Data.Ticket
+
+	if re.Data.NextService == "auth/modifyPwd" {
+		challenge := PasswordChangeChallenge{
+			Code:         int(re.Data.ModifyPwdCode),
+			Message:      re.Data.ModifyPwdMessage,
+			Username:     re.Data.Username,
+			Domain:       re.Data.Domain,
+			Prompt:       re.Data.PwdRulePrompt,
+			Strategy:     decodePasswordStrategy(re.Data.PswStrategy),
+			CanSkip:      int(re.Data.ModifyPwdCode) == codePasswordChangeSkippable,
+			ShowAccount:  int(re.Data.ModifyPwdCode) == codePasswordAccountRename || int(re.Data.ModifyPwdCode) == codePasswordChangeSkippable,
+			CustomizePwd: re.Data.Domain != "" && re.Data.Domain != "local",
+		}
+		if challenge.Username == "" {
+			challenge.Username = username
+		}
+		if challenge.Domain == "" {
+			challenge.Domain = loginDomain
+		}
+		s.stateMu.Lock()
+		s.passwordChange = &challenge
+		s.stateMu.Unlock()
+	}
 
 	s.nextService = re.Data.NextService
 	// The server issues a fresh antiReplayRand; the challenge token must use it (stale -> 75500000).
@@ -149,16 +178,36 @@ func encryptPKCS1v15Chunks(pub *rsa.PublicKey, plaintext []byte) ([]byte, error)
 
 // encryptChallengeResponse encrypts a code as "<code>_<antiReplayRand>" via PKCS#1 v1.5, like the password.
 func (s *Session) encryptChallengeResponse(code string) (string, error) {
-	N, ok := new(big.Int).SetString(s.pubKey, 16)
+	s.stateMu.Lock()
+	antiReplayRand := s.antiReplayRand
+	s.stateMu.Unlock()
+	return s.encryptWithPortalKey(code + "_" + antiReplayRand)
+}
+
+// encryptSecret encrypts a bare secret (a password on the change endpoints)
+// with the portal key. Unlike the login it carries no anti-replay suffix: the
+// vendor's change pages encrypt only the password.
+func (s *Session) encryptSecret(secret string) (string, error) {
+	return s.encryptWithPortalKey(secret)
+}
+
+// encryptWithPortalKey is the one place the portal's RSA key is parsed.
+func (s *Session) encryptWithPortalKey(plaintext string) (string, error) {
+	s.stateMu.Lock()
+	pubKey := s.pubKey
+	pubKeyExp := s.pubKeyExp
+	s.stateMu.Unlock()
+
+	N, ok := new(big.Int).SetString(pubKey, 16)
 	if !ok {
 		return "", fmt.Errorf("invalid RSA public key modulus")
 	}
-	E, err := strconv.Atoi(s.pubKeyExp)
+	E, err := strconv.Atoi(pubKeyExp)
 	if err != nil || E <= 0 {
-		return "", fmt.Errorf("invalid RSA public key exponent %q", s.pubKeyExp)
+		return "", fmt.Errorf("invalid RSA public key exponent %q", pubKeyExp)
 	}
 	pub := &rsa.PublicKey{N: N, E: E}
-	cipherBytes, err := encryptPKCS1v15Chunks(pub, []byte(code+"_"+s.antiReplayRand))
+	cipherBytes, err := encryptPKCS1v15Chunks(pub, []byte(plaintext))
 	if err != nil {
 		return "", err
 	}

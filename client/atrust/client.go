@@ -47,7 +47,13 @@ type SetupOptions struct {
 	ResourceData             []byte
 	BestNodesRefreshInterval time.Duration
 	ChallengeHandler         authchallenge.Handler
-	SessionRefreshInterval   time.Duration
+	// PasswordChangeHandler answers a forced password change during login. A nil
+	// handler turns the demand into a *auth.PasswordChangeRequiredError.
+	PasswordChangeHandler auth.PasswordChangeHandler
+	// OnPasswordChanged receives the new password after the portal accepted a
+	// forced change.
+	OnPasswordChanged      func(newPassword string)
+	SessionRefreshInterval time.Duration
 	// AutoRelogin lets the recovery ladder repeat a full login when a renewal and
 	// a restore both failed. It is off by default: a full login rotates the device
 	// token and drops other clients of the same account.
@@ -227,6 +233,58 @@ func (c *Client) Apps() ([]client.App, error) {
 	}
 
 	return c.apps, nil
+}
+
+// authSession returns the live portal session, which owns the CSRF token and
+// the RSA key the password calls need.
+func (c *Client) authSession() (*auth.Session, error) {
+	c.sessionMu.RLock()
+	session := c.session
+	c.sessionMu.RUnlock()
+	if session == nil {
+		return nil, errors.New("the aTrust session is not ready")
+	}
+	return session, nil
+}
+
+// ChangePassword completes a forced password change on a session that setup
+// left alive after returning *auth.PasswordChangeRequiredError. The caller has
+// to run Setup again with the new password afterwards.
+func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword string) error {
+	session, err := c.authSession()
+	if err != nil {
+		return err
+	}
+	return session.ChangePassword(ctx, oldPassword, newPassword)
+}
+
+// ResetPassword resets the password of the live session. The portal is
+// expected to end other terminals' sessions afterwards.
+func (c *Client) ResetPassword(ctx context.Context, oldPassword, newPassword string) error {
+	session, err := c.authSession()
+	if err != nil {
+		return err
+	}
+	return session.ResetPassword(ctx, oldPassword, newPassword)
+}
+
+// PasswordStrategy returns the account's password policy.
+func (c *Client) PasswordStrategy(ctx context.Context) (auth.PasswordStrategy, error) {
+	session, err := c.authSession()
+	if err != nil {
+		return auth.PasswordStrategy{}, err
+	}
+	return session.PasswordStrategy(ctx)
+}
+
+// CheckWeakPassword asks the portal whether a candidate password is in the
+// weak-password database.
+func (c *Client) CheckWeakPassword(ctx context.Context, password string) (auth.WeakPasswordResult, error) {
+	session, err := c.authSession()
+	if err != nil {
+		return auth.WeakPasswordResult{}, err
+	}
+	return session.CheckWeakPassword(ctx, password)
 }
 
 func (c *Client) IPResources() ([]client.IPResource, error) {
@@ -447,10 +505,12 @@ func (c *Client) establishSession(
 	}
 
 	loginResult, err := sess.Login(options.LoginMethod, auth.LoginOptions{
-		DeviceID:         c.DeviceID,
-		Cookies:          clientAuthData.Cookies,
-		TOTPSecret:       options.TOTPSecret,
-		ChallengeHandler: options.ChallengeHandler,
+		DeviceID:              c.DeviceID,
+		Cookies:               clientAuthData.Cookies,
+		TOTPSecret:            options.TOTPSecret,
+		ChallengeHandler:      options.ChallengeHandler,
+		PasswordChangeHandler: options.PasswordChangeHandler,
+		OnPasswordChanged:     options.OnPasswordChanged,
 	})
 	if err != nil {
 		log.Println("Login error:", err)
@@ -533,6 +593,13 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 
 	establishment, err := c.establishSession(setupCtx, sess, options, &clientAuthData, options.ResourceData)
 	if err != nil {
+		// A forced password change is a step, not a dead session: the caller
+		// may finish it through ChangePassword and start setup again. The
+		// session therefore has to outlive the setup call that asked.
+		var required *auth.PasswordChangeRequiredError
+		if errors.As(err, &required) {
+			sess.SetLifetime(c.lifecycleCtx)
+		}
 		return nil, err
 	}
 	resourceData := establishment.resourceData
@@ -563,9 +630,11 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	c.saveClientData = options.SaveClientData
 	c.loginMethod = options.LoginMethod
 	c.loginOptions = auth.LoginOptions{
-		DeviceID:         c.DeviceID,
-		TOTPSecret:       options.TOTPSecret,
-		ChallengeHandler: options.ChallengeHandler,
+		DeviceID:              c.DeviceID,
+		TOTPSecret:            options.TOTPSecret,
+		ChallengeHandler:      options.ChallengeHandler,
+		PasswordChangeHandler: options.PasswordChangeHandler,
+		OnPasswordChanged:     options.OnPasswordChanged,
 	}
 	c.autoRelogin = options.AutoRelogin
 	c.onSessionState = options.OnSessionState

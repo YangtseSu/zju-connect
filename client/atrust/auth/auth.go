@@ -134,6 +134,12 @@ type Session struct {
 
 	response         map[string]json.RawMessage
 	challengeHandler authchallenge.Handler
+	// passwordChange is the forced-change demand the password answer carried,
+	// and passwordChangeHandler is how the caller answers it. The notifier is
+	// called only after the portal accepted the new password.
+	passwordChange        *PasswordChangeChallenge
+	passwordChangeHandler PasswordChangeHandler
+	onPasswordChanged     func(newPassword string)
 }
 
 func NewSession(server string, tlsKeyLogWriter io.Writer, dialContext ...client.DialContextFunc) *Session {
@@ -234,6 +240,12 @@ type LoginOptions struct {
 	Cookies          []Cookie
 	TOTPSecret       string
 	ChallengeHandler authchallenge.Handler
+	// PasswordChangeHandler answers a forced password change. Without one, Login
+	// returns a *PasswordChangeRequiredError instead of failing generically.
+	PasswordChangeHandler PasswordChangeHandler
+	// OnPasswordChanged receives the new password after the portal accepted a
+	// forced change, so the caller can replace a stored credential.
+	OnPasswordChanged func(newPassword string)
 }
 
 type LoginResult struct {
@@ -348,6 +360,8 @@ func (s *Session) continueAuth(step authStep) error {
 			step, err = s.completeEnhancedAuth(step)
 		case "auth/bindAuthDevice":
 			step, err = s.bindAuthDevice(step)
+		case "auth/modifyPwd":
+			step, err = s.completePasswordChange()
 		case "auth/token":
 			return fmt.Errorf("token authentication type is missing")
 		default:
@@ -409,6 +423,11 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 	s.deviceID = opts.DeviceID
 	s.totpSecret = opts.TOTPSecret
 	s.challengeHandler = opts.ChallengeHandler
+	s.stateMu.Lock()
+	s.passwordChange = nil
+	s.passwordChangeHandler = opts.PasswordChangeHandler
+	s.onPasswordChanged = opts.OnPasswordChanged
+	s.stateMu.Unlock()
 	if s.challengeHandler == nil {
 		s.challengeHandler = authchallenge.NewCLIHandler(authchallenge.CLIOptions{})
 	}
@@ -453,12 +472,29 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 		return LoginResult{}, err
 	}
 
-	err = s.reportEnv()
-	if err != nil {
-		return LoginResult{}, err
+	// A forced password change is part of the login, not a failure: answer it
+	// before the environment report, because a portal that demands a new
+	// password may not have issued a ticket yet.
+	nextService := s.nextService
+	changedPassword := false
+	if nextService == "auth/modifyPwd" {
+		step, changeErr := s.completePasswordChange()
+		if changeErr != nil {
+			return LoginResult{}, changeErr
+		}
+		nextService = step.Service
+		changedPassword = true
 	}
 
-	nextService := s.nextService
+	switch {
+	case changedPassword && s.ticket == "":
+		log.Println("Skipping the environment report: the portal issued no ticket after the password change")
+	default:
+		if err := s.reportEnv(); err != nil {
+			return LoginResult{}, err
+		}
+	}
+
 	if nextService == "" {
 		nextService = "auth/authCheck"
 	}
