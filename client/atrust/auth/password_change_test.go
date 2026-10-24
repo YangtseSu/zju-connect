@@ -104,7 +104,7 @@ func TestLoginCompletesForcedPasswordChangeFromAuthCheck(t *testing.T) {
 	}
 
 	var sentOld, sentNew, sentName string
-	var authConfigCalls, authCheckCalls int
+	var authConfigCalls, pswCalls, authCheckCalls int
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/public/authConfig":
@@ -113,8 +113,13 @@ func TestLoginCompletesForcedPasswordChangeFromAuthCheck(t *testing.T) {
 				`"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}]}}`,
 				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
 		case "/passport/v1/auth/psw":
-			// The live gateway does not name the change here; authCheck does.
-			fmt.Fprint(w, `{"code":0,"data":{"ticket":"t","nextService":"auth/authCheck","antiReplayRand":"psw-rand"}}`)
+			pswCalls++
+			if pswCalls == 1 {
+				// The live gateway does not name the change here; authCheck does.
+				fmt.Fprint(w, `{"code":0,"data":{"ticket":"t","nextService":"auth/authCheck","antiReplayRand":"psw-rand"}}`)
+				return
+			}
+			fmt.Fprint(w, `{"code":0,"data":{"ticket":"t2","nextService":"auth/authCheck"}}`)
 		case "/controller/v1/public/reportEnv":
 			fmt.Fprint(w, `{"code":0}`)
 		case "/passport/v1/auth/authCheck":
@@ -129,6 +134,9 @@ func TestLoginCompletesForcedPasswordChangeFromAuthCheck(t *testing.T) {
 		case "/passport/v1/auth/modifyPwd":
 			if err := r.ParseForm(); err != nil {
 				t.Errorf("parse the modifyPwd form: %v", err)
+			}
+			if authConfigCalls != 1 {
+				t.Errorf("authConfig calls before the change = %d, want only the login's", authConfigCalls)
 			}
 			if got := r.Header.Get("x-csrf-token"); got != "csrf" {
 				t.Errorf("x-csrf-token = %q, want the login token", got)
@@ -171,8 +179,8 @@ func TestLoginCompletesForcedPasswordChangeFromAuthCheck(t *testing.T) {
 		}),
 		OnPasswordChanged: func(newPassword string) { notified = newPassword },
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
+	if !errors.Is(err, ErrReauthRequired) {
+		t.Fatalf("Login() error = %v, want ErrReauthRequired after the change", err)
 	}
 	if sentOld != "old-password_psw-rand" || sentNew != "new-password_psw-rand" {
 		t.Fatalf("modifyPwd passwords = %q / %q, want the password answer's nonce", sentOld, sentNew)
@@ -183,8 +191,15 @@ func TestLoginCompletesForcedPasswordChangeFromAuthCheck(t *testing.T) {
 	if notified != "new-password" {
 		t.Fatalf("OnPasswordChanged = %q, want new-password", notified)
 	}
-	if authConfigCalls != 1 {
-		t.Fatalf("authConfig calls = %d, want only the login's own call", authConfigCalls)
+
+	// The caller's retry: a fresh login with the new password reaches online.
+	if _, err := session.Login(PasswordLogin{Username: "student", Password: "new-password", Domain: "local"}, LoginOptions{
+		DeviceID: "0123456789abcdef0123456789abcdef",
+	}); err != nil {
+		t.Fatalf("second Login() error = %v", err)
+	}
+	if authConfigCalls != 2 {
+		t.Fatalf("authConfig calls = %d, want one per login", authConfigCalls)
 	}
 }
 
@@ -228,8 +243,8 @@ func TestLoginSkipsForcedPasswordChange(t *testing.T) {
 			return PasswordChangeResponse{Skip: true}, nil
 		}),
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
+	if !errors.Is(err, ErrReauthRequired) {
+		t.Fatalf("Login() error = %v, want ErrReauthRequired after the skip", err)
 	}
 	if !skipSent {
 		t.Fatal("the skip answer did not reach /passport/v1/auth/modifyPwd")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -321,6 +322,13 @@ func (s *Session) capturePasswordChange(nextService string, data passwordChangeD
 	s.stateMu.Unlock()
 }
 
+// ErrReauthRequired reports that the forced-change step completed (the password
+// changed, or the user skipped it) and the pending authentication cannot
+// continue: the portal counts the account as logged in and refuses the
+// follow-up authCheck with 75500006. The caller has to start a fresh login,
+// with the new password after a change.
+var ErrReauthRequired = errors.New("the portal requires a fresh login after the password change step")
+
 // PasswordChangeChallenge is the gateway's forced password change: the account
 // has to choose a new password before the login can finish.
 type PasswordChangeChallenge struct {
@@ -429,7 +437,7 @@ func (s *Session) completePasswordChange() (authStep, error) {
 		}
 		s.clearPasswordChange()
 		log.Printf("Skipped the password change, %d skip(s) left", result.Data.RemainedSkipTimes)
-		return nextAuthStep(result.Data.NextService), nil
+		return authStep{}, ErrReauthRequired
 	}
 
 	if strings.TrimSpace(response.NewPassword) == "" {
@@ -449,15 +457,8 @@ func (s *Session) completePasswordChange() (authStep, error) {
 	if notify := s.passwordChangedNotifier(); notify != nil {
 		notify(response.NewPassword)
 	}
-	return nextAuthStep(nextService), nil
-}
-
-// nextAuthStep turns a portal answer's nextService into the chain's next step.
-func nextAuthStep(service string) authStep {
-	if service == "" {
-		service = "auth/authCheck"
-	}
-	return authStep{Service: service}
+	log.Printf("Password changed; a fresh login is required (nextService=%q)", nextService)
+	return authStep{}, ErrReauthRequired
 }
 
 // pendingPasswordChange returns the challenge the password answer described.
