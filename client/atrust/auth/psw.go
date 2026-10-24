@@ -184,13 +184,6 @@ func (s *Session) encryptChallengeResponse(code string) (string, error) {
 	return s.encryptWithPortalKey(code + "_" + antiReplayRand)
 }
 
-// encryptSecret encrypts a bare secret (a password on the change endpoints)
-// with the portal key. Unlike the login it carries no anti-replay suffix: the
-// vendor's change pages encrypt only the password.
-func (s *Session) encryptSecret(secret string) (string, error) {
-	return s.encryptWithPortalKey(secret)
-}
-
 // encryptWithPortalKey is the one place the portal's RSA key is parsed.
 func (s *Session) encryptWithPortalKey(plaintext string) (string, error) {
 	s.stateMu.Lock()

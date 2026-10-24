@@ -107,7 +107,7 @@ func TestLoginCompletesForcedPasswordChange(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/public/authConfig":
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d",`+
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce",`+
 				`"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}]}}`,
 				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
 		case "/passport/v1/auth/psw":
@@ -159,8 +159,8 @@ func TestLoginCompletesForcedPasswordChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if sentOld != "old-password" || sentNew != "new-password" {
-		t.Fatalf("modifyPwd passwords = %q / %q", sentOld, sentNew)
+	if sentOld != "old-password_nonce" || sentNew != "new-password_nonce" {
+		t.Fatalf("modifyPwd passwords = %q / %q, want the anti-replay suffix", sentOld, sentNew)
 	}
 	if sentName != "renamed" {
 		t.Fatalf("newUserName = %q, want renamed", sentName)
@@ -180,7 +180,7 @@ func TestLoginSkipsForcedPasswordChange(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/public/authConfig":
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d",`+
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce",`+
 				`"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}]}}`,
 				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
 		case "/passport/v1/auth/psw":
@@ -219,14 +219,27 @@ func TestLoginSkipsForcedPasswordChange(t *testing.T) {
 }
 
 func TestResetPasswordUsesTheSecurityEndpoint(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var received map[string]string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/passport/v1/public/authConfig" {
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":1,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
+				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
+			return
+		}
 		if r.URL.Path != "/passport/v1/security/modifyPwd" {
 			http.NotFound(w, r)
 			return
 		}
 		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 			t.Errorf("Content-Type = %q", got)
+		}
+		if got := r.URL.Query().Get("clientType"); got != "SDPClient" {
+			t.Errorf("clientType query = %q", got)
 		}
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &received); err != nil {
@@ -236,14 +249,18 @@ func TestResetPasswordUsesTheSecurityEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session, privateKey := newPasswordTestSession(t, server)
+	session := newTLSTestSession(server)
+	session.pubKey = privateKey.PublicKey.N.Text(16)
+	session.pubKeyExp = strconv.Itoa(privateKey.PublicKey.E)
+	session.antiReplayRand = "nonce"
+
 	if err := session.ResetPassword(context.Background(), "old-password", "new-password"); err != nil {
 		t.Fatalf("ResetPassword() error = %v", err)
 	}
-	if got := decryptSecret(t, privateKey, received["oldPassword"]); got != "old-password" {
+	if got := decryptSecret(t, privateKey, received["oldPassword"]); got != "old-password_nonce" {
 		t.Fatalf("oldPassword = %q", got)
 	}
-	if got := decryptSecret(t, privateKey, received["newPassword"]); got != "new-password" {
+	if got := decryptSecret(t, privateKey, received["newPassword"]); got != "new-password_nonce" {
 		t.Fatalf("newPassword = %q", got)
 	}
 }
@@ -256,6 +273,11 @@ func TestChangePasswordUsesTheForcedEndpoint(t *testing.T) {
 
 	var sentOld, sentNew string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/passport/v1/public/authConfig" {
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
+				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
+			return
+		}
 		if r.URL.Path != "/passport/v1/auth/modifyPwd" {
 			http.NotFound(w, r)
 			return
@@ -265,6 +287,9 @@ func TestChangePasswordUsesTheForcedEndpoint(t *testing.T) {
 		}
 		if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
 			t.Errorf("Content-Type = %q", got)
+		}
+		if got := r.URL.Query().Get("clientType"); got != "SDPClient" {
+			t.Errorf("clientType query = %q", got)
 		}
 		if r.PostForm.Get("skip") != "" || r.PostForm.Get("newUserName") != "" {
 			t.Errorf("unexpected form fields: %v", r.PostForm)
@@ -283,19 +308,32 @@ func TestChangePasswordUsesTheForcedEndpoint(t *testing.T) {
 	if err := session.ChangePassword(context.Background(), "old-password", "new-password"); err != nil {
 		t.Fatalf("ChangePassword() error = %v", err)
 	}
-	if sentOld != "old-password" || sentNew != "new-password" {
+	if sentOld != "old-password_nonce" || sentNew != "new-password_nonce" {
 		t.Fatalf("passwords = %q / %q", sentOld, sentNew)
 	}
 }
 
 func TestChangePasswordReportsAPortalCode(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/passport/v1/public/authConfig" {
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
+				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
+			return
+		}
 		fmt.Fprint(w, `{"code":75500403,"message":"the old password is wrong"}`)
 	}))
 	defer server.Close()
 
-	session, _ := newPasswordTestSession(t, server)
-	err := session.ChangePassword(context.Background(), "wrong", "new-password")
+	session := newTLSTestSession(server)
+	session.pubKey = privateKey.PublicKey.N.Text(16)
+	session.pubKeyExp = strconv.Itoa(privateKey.PublicKey.E)
+
+	err = session.ChangePassword(context.Background(), "wrong", "new-password")
 	var coded *PortalCodeError
 	if !errors.As(err, &coded) || coded.Code != 75500403 {
 		t.Fatalf("ChangePassword() error = %v, want code 75500403", err)

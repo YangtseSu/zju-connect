@@ -443,11 +443,17 @@ func (s *Session) ChangePassword(ctx context.Context, oldPassword, newPassword s
 // The endpoint is form-urlencoded and encrypts both passwords; unlike the login
 // it does not append the anti-replay nonce.
 func (s *Session) changePasswordForm(ctx context.Context, challenge PasswordChangeChallenge, response PasswordChangeResponse) (string, error) {
-	oldCipher, err := s.encryptSecret(response.OldPassword)
+	// The vendor's page fetches authConfig right before encrypting (the
+	// password helper `ti` calls it), because the portal rotates the RSA key
+	// and the anti-replay nonce. A stale pair is a parameter error.
+	if _, _, err := s.authConfigContext(ctx, false, false, false); err != nil {
+		return "", fmt.Errorf("refresh the password key: %w", err)
+	}
+	oldCipher, err := s.encryptChallengeResponse(response.OldPassword)
 	if err != nil {
 		return "", err
 	}
-	newCipher, err := s.encryptSecret(response.NewPassword)
+	newCipher, err := s.encryptChallengeResponse(response.NewPassword)
 	if err != nil {
 		return "", err
 	}
@@ -473,11 +479,16 @@ func (s *Session) changePasswordForm(ctx context.Context, challenge PasswordChan
 // /passport/v1/security/modifyPwd (个人信息 → 密码安全 → 重置密码). Both
 // passwords are RSA-encrypted and sent as JSON.
 func (s *Session) ResetPassword(ctx context.Context, oldPassword, newPassword string) error {
-	oldCipher, err := s.encryptSecret(oldPassword)
+	// Same as the forced change: the vendor page refreshes authConfig before
+	// encrypting, and encrypts both passwords as "<password>_<antiReplayRand>".
+	if _, _, err := s.authConfigContext(ctx, false, false, false); err != nil {
+		return fmt.Errorf("refresh the password key: %w", err)
+	}
+	oldCipher, err := s.encryptChallengeResponse(oldPassword)
 	if err != nil {
 		return err
 	}
-	newCipher, err := s.encryptSecret(newPassword)
+	newCipher, err := s.encryptChallengeResponse(newPassword)
 	if err != nil {
 		return err
 	}
@@ -490,7 +501,7 @@ func (s *Session) ResetPassword(ctx context.Context, oldPassword, newPassword st
 		return err
 	}
 
-	u := s.baseURL + "/passport/v1/security/modifyPwd"
+	u := s.baseURL + "/passport/v1/security/modifyPwd?" + WithSharedParams(nil).Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -546,7 +557,7 @@ func (s *Session) skipPasswordChange(ctx context.Context) (passwordChangeResult,
 
 // PasswordStrategy fetches the account's password policy.
 func (s *Session) PasswordStrategy(ctx context.Context) (PasswordStrategy, error) {
-	u := s.baseURL + "/passport/v1/user/pswStrategy"
+	u := s.baseURL + "/passport/v1/user/pswStrategy?" + WithSharedParams(nil).Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return PasswordStrategy{}, err
@@ -588,7 +599,7 @@ func (s *Session) CheckWeakPassword(ctx context.Context, password string) (WeakP
 		return WeakPasswordResult{}, err
 	}
 
-	u := s.baseURL + "/passport/v1/public/weakpwd"
+	u := s.baseURL + "/passport/v1/public/weakpwd?" + WithSharedParams(nil).Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
 	if err != nil {
 		return WeakPasswordResult{}, err
@@ -626,7 +637,7 @@ func (s *Session) CheckWeakPassword(ctx context.Context, password string) (WeakP
 
 // postPasswordForm posts a form-urlencoded answer to a password endpoint.
 func (s *Session) postPasswordForm(ctx context.Context, path string, form url.Values) (passwordChangeResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+path, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+path+"?"+WithSharedParams(nil).Encode(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return passwordChangeResult{}, err
 	}
