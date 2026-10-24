@@ -359,6 +359,11 @@ func TestChangePasswordReportsAPortalCode(t *testing.T) {
 }
 
 func TestPasswordStrategyAndWeakPassword(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/user/pswStrategy":
@@ -367,8 +372,12 @@ func TestPasswordStrategyAndWeakPassword(t *testing.T) {
 				`"enablePswNotContainName":true,"notContainContChar":{"enable":true,"value":3},"notBelongToWeakDb":1}}`)
 		case "/passport/v1/public/weakpwd":
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), `"password":"123456"`) {
-				t.Errorf("weakpwd body = %s", body)
+			var sent map[string]string
+			if err := json.Unmarshal(body, &sent); err != nil {
+				t.Errorf("decode the weakpwd body: %v", err)
+			}
+			if got := decryptSecret(t, privateKey, sent["password"]); got != "123456_nonce" {
+				t.Errorf("weakpwd password = %q, want the encrypted nonce form", got)
 			}
 			fmt.Fprint(w, `{"code":0,"validate":false,"msg":"common password"}`)
 		default:
@@ -377,7 +386,11 @@ func TestPasswordStrategyAndWeakPassword(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session, _ := newPasswordTestSession(t, server)
+	session := newTLSTestSession(server)
+	session.pubKey = privateKey.PublicKey.N.Text(16)
+	session.pubKeyExp = strconv.Itoa(privateKey.PublicKey.E)
+	session.antiReplayRand = "nonce"
+
 	strategy, err := session.PasswordStrategy(context.Background())
 	if err != nil {
 		t.Fatalf("PasswordStrategy() error = %v", err)
@@ -420,5 +433,42 @@ func TestPasswordStrategyAcceptsAValidPassword(t *testing.T) {
 	}
 	if violations := strategy.Violations("Aa1!aaaa", "student"); len(violations) != 1 {
 		t.Fatalf("Violations(Aa1!aaaa) = %v, want the repetition failure", violations)
+	}
+}
+
+// A renewal answer may carry only the session flags. It must not wipe the CSRF
+// token, key or nonce the next authenticated call signs with.
+func TestAuthConfigRenewalKeepsLoginState(t *testing.T) {
+	calls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			fmt.Fprint(w, `{"code":0,"data":{"isLogin":1}}`)
+			return
+		}
+		fmt.Fprint(w, `{"code":0,"data":{"isLogin":1,"csrfToken":"new-csrf","pubKey":"new-key","pubKeyExp":"3","antiReplayRand":"new-rand"}}`)
+	}))
+	defer server.Close()
+
+	session := newTLSTestSession(server)
+	session.csrfToken = "csrf"
+	session.pubKey = "key"
+	session.pubKeyExp = "65537"
+	session.antiReplayRand = "rand"
+
+	if _, _, err := session.authConfigContext(context.Background(), false, false, false); err != nil {
+		t.Fatalf("authConfigContext() error = %v", err)
+	}
+	if session.csrfToken != "csrf" || session.pubKey != "key" || session.antiReplayRand != "rand" {
+		t.Fatalf("a renewal without the fields wiped the state: csrf=%q key=%q rand=%q",
+			session.csrfToken, session.pubKey, session.antiReplayRand)
+	}
+
+	if _, _, err := session.authConfigContext(context.Background(), false, false, false); err != nil {
+		t.Fatalf("authConfigContext() error = %v", err)
+	}
+	if session.csrfToken != "new-csrf" || session.pubKey != "new-key" || session.antiReplayRand != "new-rand" {
+		t.Fatalf("a renewal with the fields was ignored: csrf=%q key=%q rand=%q",
+			session.csrfToken, session.pubKey, session.antiReplayRand)
 	}
 }

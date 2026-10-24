@@ -536,6 +536,7 @@ func (s *Session) changePasswordForm(ctx context.Context, challenge PasswordChan
 // /passport/v1/security/modifyPwd (个人信息 → 密码安全 → 重置密码). Both
 // passwords are RSA-encrypted and sent as JSON.
 func (s *Session) ResetPassword(ctx context.Context, oldPassword, newPassword string) error {
+	log.Println("Perform POST /passport/v1/security/modifyPwd")
 	// The vendor page encrypts both passwords as
 	// "<password>_<antiReplayRand>" with the key its SDK store holds. That
 	// store is updated from the login answer (and the renewal loop), so the
@@ -587,6 +588,7 @@ func (s *Session) ResetPassword(ctx context.Context, oldPassword, newPassword st
 		return fmt.Errorf("parse the password change answer: %w", err)
 	}
 	if re.Code != 0 {
+		log.Printf("security/modifyPwd failed with code %d: %s", re.Code, re.Message)
 		return &PortalCodeError{Op: "security/modifyPwd", Code: re.Code, Message: re.Message}
 	}
 	return nil
@@ -614,6 +616,7 @@ func (s *Session) skipPasswordChange(ctx context.Context) (passwordChangeResult,
 
 // PasswordStrategy fetches the account's password policy.
 func (s *Session) PasswordStrategy(ctx context.Context) (PasswordStrategy, error) {
+	log.Println("Perform GET /passport/v1/user/pswStrategy")
 	u := s.baseURL + "/passport/v1/user/pswStrategy?" + WithSharedParams(nil).Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -649,9 +652,16 @@ func (s *Session) PasswordStrategy(ctx context.Context) (PasswordStrategy, error
 }
 
 // CheckWeakPassword asks the portal's weak-password database about a candidate
-// password. The endpoint expects the plaintext, exactly like the vendor page.
+// password. The vendor's page encrypts it with the portal key and the current
+// anti-replay nonce before sending it (the same `ti` helper the password
+// change uses), so the body carries "<password>_<nonce>", not the plaintext.
 func (s *Session) CheckWeakPassword(ctx context.Context, password string) (WeakPasswordResult, error) {
-	payload, err := json.Marshal(map[string]string{"password": password})
+	log.Println("Perform POST /passport/v1/public/weakpwd")
+	encrypted, err := s.encryptChallengeResponse(password)
+	if err != nil {
+		return WeakPasswordResult{}, err
+	}
+	payload, err := json.Marshal(map[string]string{"password": encrypted})
 	if err != nil {
 		return WeakPasswordResult{}, err
 	}
@@ -689,6 +699,7 @@ func (s *Session) CheckWeakPassword(ctx context.Context, password string) (WeakP
 	if message == "" {
 		message = re.Msg
 	}
+	log.Printf("weakpwd answered code=%d validate=%t", re.Code, re.Validate)
 	return WeakPasswordResult{Validate: re.Validate, Code: re.Code, Message: message}, nil
 }
 

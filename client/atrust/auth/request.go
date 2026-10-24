@@ -147,10 +147,21 @@ func (s *Session) authConfigContext(ctx context.Context, mod, needTicket, refres
 		// A response may omit the ticket; that must not throw away a good one.
 		s.ticket = re.Data.Ticket
 	}
-	s.csrfToken = responseCSRFToken
-	s.pubKey = re.Data.PubKey
-	s.pubKeyExp = re.Data.PubKeyExp
-	s.antiReplayRand = re.Data.AntiReplayRand
+	// A renewal answer may repeat only the session flags. Clearing the CSRF
+	// token, key or nonce here would leave the next authenticated call (the
+	// password reset, for one) signed with nothing.
+	if responseCSRFToken != "" {
+		s.csrfToken = responseCSRFToken
+	}
+	if re.Data.PubKey != "" {
+		s.pubKey = re.Data.PubKey
+	}
+	if re.Data.PubKeyExp != "" {
+		s.pubKeyExp = re.Data.PubKeyExp
+	}
+	if re.Data.AntiReplayRand != "" {
+		s.antiReplayRand = re.Data.AntiReplayRand
+	}
 	s.stateMu.Unlock()
 
 	isLogin := 0
