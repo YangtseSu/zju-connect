@@ -443,12 +443,6 @@ func (s *Session) ChangePassword(ctx context.Context, oldPassword, newPassword s
 // The endpoint is form-urlencoded and encrypts both passwords; unlike the login
 // it does not append the anti-replay nonce.
 func (s *Session) changePasswordForm(ctx context.Context, challenge PasswordChangeChallenge, response PasswordChangeResponse) (string, error) {
-	// The vendor's page fetches authConfig right before encrypting (the
-	// password helper `ti` calls it), because the portal rotates the RSA key
-	// and the anti-replay nonce. A stale pair is a parameter error.
-	if _, _, err := s.authConfigContext(ctx, false, false, false); err != nil {
-		return "", fmt.Errorf("refresh the password key: %w", err)
-	}
 	oldCipher, err := s.encryptChallengeResponse(response.OldPassword)
 	if err != nil {
 		return "", err
@@ -479,11 +473,11 @@ func (s *Session) changePasswordForm(ctx context.Context, challenge PasswordChan
 // /passport/v1/security/modifyPwd (个人信息 → 密码安全 → 重置密码). Both
 // passwords are RSA-encrypted and sent as JSON.
 func (s *Session) ResetPassword(ctx context.Context, oldPassword, newPassword string) error {
-	// Same as the forced change: the vendor page refreshes authConfig before
-	// encrypting, and encrypts both passwords as "<password>_<antiReplayRand>".
-	if _, _, err := s.authConfigContext(ctx, false, false, false); err != nil {
-		return fmt.Errorf("refresh the password key: %w", err)
-	}
+	// The vendor page encrypts both passwords as
+	// "<password>_<antiReplayRand>" with the key its SDK store holds. That
+	// store is updated from the login answer (and the renewal loop), so the
+	// session's own key and nonce are the ones the portal expects. Fetching
+	// authConfig here would rotate both and can drop the login's CSRF token.
 	oldCipher, err := s.encryptChallengeResponse(oldPassword)
 	if err != nil {
 		return err

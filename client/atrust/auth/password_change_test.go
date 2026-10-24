@@ -104,15 +104,17 @@ func TestLoginCompletesForcedPasswordChange(t *testing.T) {
 	}
 
 	var sentOld, sentNew, sentName string
+	var authConfigCalls int
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/public/authConfig":
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce",`+
+			authConfigCalls++
+			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"login-rand",`+
 				`"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}]}}`,
 				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
 		case "/passport/v1/auth/psw":
 			fmt.Fprint(w, `{"code":0,"data":{"ticket":"t","nextService":"auth/modifyPwd","modifyPwdCode":75500402,`+
-				`"modifyPwdMessage":"expired","username":"student","domain":"local"}}`)
+				`"modifyPwdMessage":"expired","username":"student","domain":"local","antiReplayRand":"psw-rand"}}`)
 		case "/controller/v1/public/reportEnv":
 			fmt.Fprint(w, `{"code":0}`)
 		case "/passport/v1/auth/modifyPwd":
@@ -121,6 +123,9 @@ func TestLoginCompletesForcedPasswordChange(t *testing.T) {
 			}
 			if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
 				t.Errorf("Content-Type = %q", got)
+			}
+			if got := r.Header.Get("x-csrf-token"); got != "csrf" {
+				t.Errorf("x-csrf-token = %q, want the login token", got)
 			}
 			sentOld = decryptSecret(t, privateKey, r.PostForm.Get("oldPassword"))
 			sentNew = decryptSecret(t, privateKey, r.PostForm.Get("newPassword"))
@@ -159,8 +164,11 @@ func TestLoginCompletesForcedPasswordChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if sentOld != "old-password_nonce" || sentNew != "new-password_nonce" {
-		t.Fatalf("modifyPwd passwords = %q / %q, want the anti-replay suffix", sentOld, sentNew)
+	if sentOld != "old-password_psw-rand" || sentNew != "new-password_psw-rand" {
+		t.Fatalf("modifyPwd passwords = %q / %q, want the login answer's nonce", sentOld, sentNew)
+	}
+	if authConfigCalls != 1 {
+		t.Fatalf("authConfig calls = %d, want only the login's own call", authConfigCalls)
 	}
 	if sentName != "renamed" {
 		t.Fatalf("newUserName = %q, want renamed", sentName)
@@ -226,11 +234,6 @@ func TestResetPasswordUsesTheSecurityEndpoint(t *testing.T) {
 
 	var received map[string]string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/passport/v1/public/authConfig" {
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":1,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
-				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
-			return
-		}
 		if r.URL.Path != "/passport/v1/security/modifyPwd" {
 			http.NotFound(w, r)
 			return
@@ -273,11 +276,6 @@ func TestChangePasswordUsesTheForcedEndpoint(t *testing.T) {
 
 	var sentOld, sentNew string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/passport/v1/public/authConfig" {
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
-				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
-			return
-		}
 		if r.URL.Path != "/passport/v1/auth/modifyPwd" {
 			http.NotFound(w, r)
 			return
@@ -320,11 +318,6 @@ func TestChangePasswordReportsAPortalCode(t *testing.T) {
 	}
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/passport/v1/public/authConfig" {
-			fmt.Fprintf(w, `{"code":0,"data":{"isLogin":0,"csrfToken":"csrf","pubKey":"%s","pubKeyExp":"%d","antiReplayRand":"nonce"}}`,
-				privateKey.PublicKey.N.Text(16), privateKey.PublicKey.E)
-			return
-		}
 		fmt.Fprint(w, `{"code":75500403,"message":"the old password is wrong"}`)
 	}))
 	defer server.Close()
