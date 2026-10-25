@@ -739,7 +739,7 @@ func (s *Session) postPasswordForm(ctx context.Context, path string, form url.Va
 
 // setPortalHeaders applies the headers every passport request needs.
 func (s *Session) setPortalHeaders(req *http.Request, contentType string) {
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

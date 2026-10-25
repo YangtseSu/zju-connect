@@ -112,7 +112,7 @@ func (s *Session) submitTokenAt(service string, payload map[string]interface{}) 
 	if err != nil {
 		return authStep{}, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-env", s.env)
@@ -146,7 +146,7 @@ func (s *Session) accessCheck() (authStep, error) {
 	if err != nil {
 		return authStep{}, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 

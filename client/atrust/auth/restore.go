@@ -33,7 +33,7 @@ func (s *Session) TicketExchange(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	// Measured against the gateway: this POST only succeeds with a JSON content
 	// type. Without it the portal answers 401 with an empty body - even though the
 	// request carries no body at all - which then looks like a JSON parse failure.
@@ -122,7 +122,7 @@ func (s *Session) sessionIDExchange(ctx context.Context, sidTicket string) error
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-csrf-token", s.CSRFToken())
 	req.Header.Set("x-sdp-rid", s.rid)

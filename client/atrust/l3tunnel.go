@@ -57,10 +57,13 @@ func NewL3Tunnel(aTrustClient *Client) (*L3Tunnel, error) {
 	}
 	t.connect = func(ctx context.Context, addr string, conntrackMgr *conntrackMgr) (*l3TunnelConn, error) {
 		info := clientInfo{
-			sidProvider:  aTrustClient.sessionSID,
-			deviceID:     aTrustClient.DeviceID,
-			connectionID: aTrustClient.ConnectionID,
-			username:     aTrustClient.Username,
+			sidProvider:    aTrustClient.sessionSID,
+			deviceID:       aTrustClient.DeviceID,
+			connectionID:   aTrustClient.ConnectionID,
+			username:       aTrustClient.Username,
+			processName:    aTrustClient.tunnelProcess.Name,
+			processPath:    aTrustClient.tunnelProcess.Path,
+			processVersion: aTrustClient.tunnelProcess.Version,
 		}
 		dialTLS := func(ctx context.Context, network, address string, config *tls.Config) (*tls.Conn, error) {
 			return dialTLSContext(ctx, aTrustClient.underlayDialer, network, address, tlsConfig(config, aTrustClient.tlsKeyLogWriter))

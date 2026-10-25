@@ -64,6 +64,11 @@ type clientInfo struct {
 	deviceID     string
 	connectionID string
 	username     string
+	// processName/processPath/processVersion replace the block the tunnel
+	// authorisation reports. An empty field keeps the default decoy.
+	processName    string
+	processPath    string
+	processVersion string
 }
 
 func (info clientInfo) currentSID() (string, error) {
@@ -687,8 +692,18 @@ func buildAuthRequest(info clientInfo, signKey []byte, meta packetMeta, ct *conn
 }
 
 func defaultEnv(info clientInfo) *trustEnv {
-	procPath := "/usr/bin/zju-connect"
-	procName := "zju-connect"
+	procPath := info.processPath
+	if procPath == "" {
+		procPath = "/usr/bin/zju-connect"
+	}
+	procName := info.processName
+	if procName == "" {
+		procName = "zju-connect"
+	}
+	procVersion := info.processVersion
+	if procVersion == "" {
+		procVersion = "TrustAppClosed"
+	}
 	fingerprint := fmt.Sprintf("%X", sha256.Sum256([]byte(procPath)))
 	platform := strings.Title(runtime.GOOS)
 	if platform == "Darwin" {
@@ -702,7 +717,7 @@ func defaultEnv(info clientInfo) *trustEnv {
 	env.Application.Runtime.Process.Fingerprint = fingerprint
 	env.Application.Runtime.Process.Description = "TrustAppClosed"
 	env.Application.Runtime.Process.Path = procPath
-	env.Application.Runtime.Process.Version = "TrustAppClosed"
+	env.Application.Runtime.Process.Version = procVersion
 	env.Application.Runtime.Process.SecurityEnv = "normal"
 	env.Application.Runtime.ProcessTrusted = "TRUSTED"
 	return &env

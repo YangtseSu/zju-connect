@@ -132,7 +132,11 @@ type Session struct {
 	ticket         string
 	nextService    string
 
-	response          map[string]json.RawMessage
+	response map[string]json.RawMessage
+	// userAgent is the UA every request of this session carries. It starts as
+	// the package default and a caller may replace it once, before the first
+	// request (see SetUserAgent).
+	userAgent         string
 	challengeHandler  authchallenge.Handler
 	deviceBindHandler DeviceBindHandler
 	// passwordChange is the forced-change demand the password answer carried,
@@ -164,12 +168,22 @@ func NewSessionContext(ctx context.Context, server string, tlsKeyLogWriter io.Wr
 	httpClient := &http.Client{Transport: tr, Jar: jar, Timeout: 20 * time.Second}
 
 	return &Session{
-		ctx:      ctx,
-		client:   httpClient,
-		baseHost: server,
-		baseURL:  "https://" + server,
-		rid:      base64.StdEncoding.EncodeToString([]byte(server)),
-		response: make(map[string]json.RawMessage),
+		ctx:       ctx,
+		client:    httpClient,
+		baseHost:  server,
+		baseURL:   "https://" + server,
+		rid:       base64.StdEncoding.EncodeToString([]byte(server)),
+		response:  make(map[string]json.RawMessage),
+		userAgent: UserAgent,
+	}
+}
+
+// SetUserAgent overrides the UA before the first request. A caller that
+// presents an installation identity uses it, so the login and the tunnel
+// carry that string instead of the package default.
+func (s *Session) SetUserAgent(userAgent string) {
+	if userAgent != "" {
+		s.userAgent = userAgent
 	}
 }
 

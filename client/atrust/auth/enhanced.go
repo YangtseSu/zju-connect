@@ -76,7 +76,7 @@ func (s *Session) requestAuthStep(method string, step authStep, body []byte) (au
 	if err != nil {
 		return authStep{}, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-env", s.env)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())

@@ -24,7 +24,7 @@ func (s *Session) ServerVersionInfo() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 
 	resp, err := s.request(req)
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *Session) authConfigContext(ctx context.Context, mod, needTicket, refres
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.CSRFToken())
 	req.Header.Set("x-sdp-rid", s.rid)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
@@ -213,7 +213,7 @@ func (s *Session) performAntiMITMRequestContext(ctx context.Context, data antiMI
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-csrf-token", csrfToken)
 	req.Header.Set("x-sdp-rid", s.rid)
@@ -285,7 +285,7 @@ func (s *Session) reportEnv() error {
 	body, _ := json.Marshal(payload)
 	log.DebugPrintf("Sending report env: %s", string(body))
 	req, _ := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(body))
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
@@ -404,7 +404,7 @@ func (s *Session) authCheck() (authStep, error) {
 
 	u := s.baseURL + "/passport/v1/auth/authCheck"
 	req, _ := http.NewRequest("GET", u+"?"+WithSharedParams(nil).Encode(), nil)
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 
@@ -446,7 +446,7 @@ func (s *Session) phoneNumber(authID string) ([]string, error) {
 		params.Set("authId", authID)
 	}
 	req, _ := http.NewRequest("GET", u+"?"+params.Encode(), nil)
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 
@@ -528,7 +528,7 @@ func (s *Session) authSms(step authStep) error {
 		return fmt.Errorf("unknown SMS authentication mode")
 	}
 	req, _ := http.NewRequest("GET", u+"?"+params.Encode(), nil)
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 
@@ -617,7 +617,7 @@ func (s *Session) secondarySMSCheckCodeImpl(step authStep, code string, skipSeco
 	default:
 		return authStep{}, fmt.Errorf("unknown SMS authentication mode")
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 
@@ -671,7 +671,7 @@ func (s *Session) onlineInfoContext(ctx context.Context) (onlineInfoResult, erro
 	if err != nil {
 		return onlineInfoResult{}, err
 	}
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.CSRFToken())
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 
@@ -734,7 +734,7 @@ func (s *Session) ClientResource() ([]byte, error) {
 	}
 	bdy, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(bdy))
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
@@ -760,7 +760,7 @@ func (s *Session) checkCode() ([]byte, error) {
 		"rnd": {strconv.FormatInt(time.Now().UnixMilli(), 10)},
 	})
 	req, _ := http.NewRequest("GET", u+"?"+params.Encode(), nil)
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Accept", "image/webp,image/apng,image/*,*/*;q=0.8")
 
 	resp, err := s.request(req)

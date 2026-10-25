@@ -87,7 +87,7 @@ func (s *Session) cas(callback string) error {
 	log.Println("Perform GET /passport/v1/auth/cas")
 
 	req, _ := http.NewRequest("GET", callback, nil)
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
 

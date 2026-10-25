@@ -532,11 +532,19 @@ func (c *Client) DialTCP(ctx context.Context, addr *net.TCPAddr) (net.Conn, erro
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to set tcp tunnel handshake timeout: %w", err)
 	}
-	procName := "google-chrome-stable"
-	procPath := "/usr/bin/google-chrome-stable"
-	if addr.Port == 22 {
-		procName = "ssh"
-		procPath = "/usr/bin/ssh"
+	procName := c.tunnelProcess.Name
+	procPath := c.tunnelProcess.Path
+	procVersion := c.tunnelProcess.Version
+	if procName == "" || procPath == "" {
+		// No process block from the caller: keep the historical decoy so a
+		// plain CLI behaves exactly as before.
+		procName = "google-chrome-stable"
+		procPath = "/usr/bin/google-chrome-stable"
+		if addr.Port == 22 {
+			procName = "ssh"
+			procPath = "/usr/bin/ssh"
+		}
+		procVersion = "TrustAppClosed"
 	}
 	procHash := fmt.Sprintf("%X", sha256.Sum256([]byte(procPath)))
 
@@ -568,7 +576,7 @@ func (c *Client) DialTCP(ctx context.Context, addr *net.TCPAddr) (net.Conn, erro
 		Fingerprint:      procHash,
 		Description:      "TrustAppClosed",
 		Path:             procPath,
-		Version:          "TrustAppClosed",
+		Version:          procVersion,
 		SecurityEnv:      "normal",
 	}
 	authRequest.Env.Application.Runtime.ProcessTrusted = "TRUSTED"

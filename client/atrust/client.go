@@ -38,6 +38,15 @@ type ClientOptions struct {
 	TLSKeyLogWriter io.Writer
 }
 
+// TunnelProcess is the process block the tunnel authorisation reports. A
+// client that presents an identity replaces the default decoy with it; an
+// empty field keeps the default for that part.
+type TunnelProcess struct {
+	Name    string
+	Path    string
+	Version string
+}
+
 type SetupOptions struct {
 	ServerAddress            string
 	ServerPort               int
@@ -47,6 +56,11 @@ type SetupOptions struct {
 	ResourceData             []byte
 	BestNodesRefreshInterval time.Duration
 	ChallengeHandler         authchallenge.Handler
+	// UserAgent overrides the aTrustTray UA for every request of this session.
+	UserAgent string
+	// TunnelProcess overrides the tunnel authorisation process block. Nil
+	// keeps the client's default, which is a plain decoy.
+	TunnelProcess *TunnelProcess
 	// DeviceBindHandler confirms auth/bindAuthDevice. Nil keeps the automatic
 	// answer for headless callers.
 	DeviceBindHandler auth.DeviceBindHandler
@@ -93,6 +107,7 @@ type Client struct {
 	lastPersisted  []byte
 	loginMethod    auth.LoginMethod
 	loginOptions   auth.LoginOptions
+	tunnelProcess  TunnelProcess
 	autoRelogin    bool
 	reloginBlocked bool
 	sessionState   SessionState
@@ -612,6 +627,10 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 		authServerHost = fmt.Sprintf("%s:%d", options.ServerAddress, options.ServerPort)
 	}
 	sess := auth.NewSessionContext(setupCtx, authServerHost, c.tlsKeyLogWriter, c.underlayDialer.DialContext)
+	sess.SetUserAgent(options.UserAgent)
+	if options.TunnelProcess != nil {
+		c.tunnelProcess = *options.TunnelProcess
+	}
 	c.sessionMu.Lock()
 	c.session = sess
 	c.sessionMu.Unlock()

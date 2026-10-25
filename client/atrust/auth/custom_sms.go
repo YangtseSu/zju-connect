@@ -146,7 +146,7 @@ func (s *Session) customSMSCheckCode(code string, skipSecondaryAuth bool) (authS
 }
 
 func (s *Session) setAuthJSONHeaders(req *http.Request) {
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", s.userAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
