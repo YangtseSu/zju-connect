@@ -132,8 +132,9 @@ type Session struct {
 	ticket         string
 	nextService    string
 
-	response         map[string]json.RawMessage
-	challengeHandler authchallenge.Handler
+	response          map[string]json.RawMessage
+	challengeHandler  authchallenge.Handler
+	deviceBindHandler DeviceBindHandler
 	// passwordChange is the forced-change demand the password answer carried,
 	// and passwordChangeHandler is how the caller answers it. The notifier is
 	// called only after the portal accepted the new password.
@@ -243,6 +244,9 @@ type LoginOptions struct {
 	Cookies          []Cookie
 	TOTPSecret       string
 	ChallengeHandler authchallenge.Handler
+	// DeviceBindHandler confirms auth/bindAuthDevice. Nil keeps the automatic
+	// answer, which is what a headless caller wants.
+	DeviceBindHandler DeviceBindHandler
 	// PasswordChangeHandler answers a forced password change. Without one, Login
 	// returns a *PasswordChangeRequiredError instead of failing generically.
 	PasswordChangeHandler PasswordChangeHandler
@@ -426,6 +430,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 	s.deviceID = opts.DeviceID
 	s.totpSecret = opts.TOTPSecret
 	s.challengeHandler = opts.ChallengeHandler
+	s.deviceBindHandler = opts.DeviceBindHandler
 	s.stateMu.Lock()
 	s.passwordChange = nil
 	s.passwordChangeHandler = opts.PasswordChangeHandler

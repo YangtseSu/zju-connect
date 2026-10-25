@@ -3,12 +3,28 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/mythologyli/zju-connect/log"
 )
+
+// DeviceBindChallenge is the portal's request to bind this installation to
+// the account. A caller with no handler answers automatically, as the CLI
+// always did.
+type DeviceBindChallenge struct {
+	DeviceID string
+	AuthID   string
+}
+
+// DeviceBindHandler answers a device-binding request. A false answer aborts
+// the login with ErrDeviceBindDeclined.
+type DeviceBindHandler func(DeviceBindChallenge) (bool, error)
+
+// ErrDeviceBindDeclined reports that the user refused the binding.
+var ErrDeviceBindDeclined = errors.New("device binding declined")
 
 var enhancedAuthServices = map[string]struct{}{
 	"auth/preEnhancedAuth": {},
@@ -24,6 +40,15 @@ func (s *Session) completeEnhancedAuth(step authStep) (authStep, error) {
 }
 
 func (s *Session) bindAuthDevice(step authStep) (authStep, error) {
+	if s.deviceBindHandler != nil {
+		allowed, err := s.deviceBindHandler(DeviceBindChallenge{DeviceID: s.deviceID, AuthID: step.AuthID})
+		if err != nil {
+			return authStep{}, err
+		}
+		if !allowed {
+			return authStep{}, ErrDeviceBindDeclined
+		}
+	}
 	payload := map[string]string{"deviceId": s.deviceID}
 	if step.AuthID != "" {
 		payload["authId"] = step.AuthID

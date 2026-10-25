@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -74,4 +75,54 @@ func TestEnhancedAndBindAuthDeviceEndpoints(t *testing.T) {
 	if step.Service != "auth/enhancedConfirm" {
 		t.Fatalf("unexpected next step: %+v", step)
 	}
+}
+
+func TestBindAuthDeviceAsksTheCaller(t *testing.T) {
+	requests := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/passport/v1/auth/bindAuthDevice" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"code":0,"data":{"nextService":"auth/enhancedDone"}}`)
+	}))
+	defer server.Close()
+
+	t.Run("declined", func(t *testing.T) {
+		requests = 0
+		session := newTLSTestSession(server)
+		session.deviceID = "device-id"
+		var seen DeviceBindChallenge
+		session.deviceBindHandler = func(challenge DeviceBindChallenge) (bool, error) {
+			seen = challenge
+			return false, nil
+		}
+		_, err := session.bindAuthDevice(authStep{Service: "auth/bindAuthDevice", AuthID: "bind-id"})
+		if !errors.Is(err, ErrDeviceBindDeclined) {
+			t.Fatalf("err = %v", err)
+		}
+		if requests != 0 {
+			t.Fatalf("the portal was asked %d times", requests)
+		}
+		if seen.DeviceID != "device-id" || seen.AuthID != "bind-id" {
+			t.Fatalf("challenge = %+v", seen)
+		}
+	})
+
+	t.Run("accepted", func(t *testing.T) {
+		requests = 0
+		session := newTLSTestSession(server)
+		session.deviceID = "device-id"
+		session.deviceBindHandler = func(DeviceBindChallenge) (bool, error) { return true, nil }
+		step, err := session.bindAuthDevice(authStep{Service: "auth/bindAuthDevice", AuthID: "bind-id"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if requests != 1 {
+			t.Fatalf("requests = %d", requests)
+		}
+		if step.Service != "auth/enhancedDone" {
+			t.Fatalf("step = %+v", step)
+		}
+	})
 }

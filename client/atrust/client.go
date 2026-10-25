@@ -47,6 +47,9 @@ type SetupOptions struct {
 	ResourceData             []byte
 	BestNodesRefreshInterval time.Duration
 	ChallengeHandler         authchallenge.Handler
+	// DeviceBindHandler confirms auth/bindAuthDevice. Nil keeps the automatic
+	// answer for headless callers.
+	DeviceBindHandler auth.DeviceBindHandler
 	// PasswordChangeHandler answers a forced password change during login. A nil
 	// handler turns the demand into a *auth.PasswordChangeRequiredError.
 	PasswordChangeHandler auth.PasswordChangeHandler
@@ -287,6 +290,42 @@ func (c *Client) CheckWeakPassword(ctx context.Context, password string) (auth.W
 	return session.CheckWeakPassword(ctx, password)
 }
 
+// QueryTerminals loads the trusted and the temporary endpoint lists from the
+// live session for the terminal-management view.
+func (c *Client) QueryTerminals(ctx context.Context) (*auth.Terminals, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	session, err := c.authSession()
+	if err != nil {
+		return nil, err
+	}
+	return session.QueryTerminals()
+}
+
+// SetTrusted trusts or untrusts this device through the live session; the
+// portal must still allow it.
+func (c *Client) SetTrusted(ctx context.Context, trusted bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	session, err := c.authSession()
+	if err != nil {
+		return err
+	}
+	result, err := session.QueryDevice()
+	if err != nil {
+		return err
+	}
+	if result.DeviceTrusted == trusted {
+		return nil
+	}
+	if trusted {
+		return session.TrustDevice([]string{result.SelfID})
+	}
+	return session.UntrustDevice([]string{result.SelfID})
+}
+
 func (c *Client) IPResources() ([]client.IPResource, error) {
 	if c.ipResources == nil {
 		return nil, errors.New("IP resources not available")
@@ -509,6 +548,7 @@ func (c *Client) establishSession(
 		Cookies:               clientAuthData.Cookies,
 		TOTPSecret:            options.TOTPSecret,
 		ChallengeHandler:      options.ChallengeHandler,
+		DeviceBindHandler:     options.DeviceBindHandler,
 		PasswordChangeHandler: options.PasswordChangeHandler,
 		OnPasswordChanged:     options.OnPasswordChanged,
 	})
@@ -633,6 +673,7 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 		DeviceID:              c.DeviceID,
 		TOTPSecret:            options.TOTPSecret,
 		ChallengeHandler:      options.ChallengeHandler,
+		DeviceBindHandler:     options.DeviceBindHandler,
 		PasswordChangeHandler: options.PasswordChangeHandler,
 		OnPasswordChanged:     options.OnPasswordChanged,
 	}
