@@ -38,9 +38,11 @@ type ClientOptions struct {
 	TLSKeyLogWriter io.Writer
 }
 
-// TunnelProcess is the process block the tunnel authorisation reports. A
-// client that presents an identity replaces the default decoy with it; an
-// empty field keeps the default for that part.
+// TunnelProcess is a process block one tunnel authorisation reports. An empty
+// field keeps the default for that part, so a caller can name only what it
+// knows. The two places it appears mean different things: TunnelProcess below
+// is the process a TCP destination request comes from, ClientProcess is the
+// client that runs the L3 environment.
 type TunnelProcess struct {
 	Name    string
 	Path    string
@@ -58,9 +60,13 @@ type SetupOptions struct {
 	ChallengeHandler         authchallenge.Handler
 	// UserAgent overrides the aTrustTray UA for every request of this session.
 	UserAgent string
-	// TunnelProcess overrides the tunnel authorisation process block. Nil
-	// keeps the client's default, which is a plain decoy.
+	// TunnelProcess overrides the process block a TCP tunnel authorisation
+	// reports, which stands for the application that asked for the
+	// destination. Nil keeps the client's per-port default.
 	TunnelProcess *TunnelProcess
+	// ClientProcess overrides the process block the L3 environment reports,
+	// which is the client itself. Nil keeps the client's own default.
+	ClientProcess *TunnelProcess
 	// DeviceBindHandler confirms auth/bindAuthDevice. Nil keeps the automatic
 	// answer for headless callers.
 	DeviceBindHandler auth.DeviceBindHandler
@@ -108,6 +114,7 @@ type Client struct {
 	loginMethod    auth.LoginMethod
 	loginOptions   auth.LoginOptions
 	tunnelProcess  TunnelProcess
+	clientProcess  TunnelProcess
 	autoRelogin    bool
 	reloginBlocked bool
 	sessionState   SessionState
@@ -630,6 +637,9 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	sess.SetUserAgent(options.UserAgent)
 	if options.TunnelProcess != nil {
 		c.tunnelProcess = *options.TunnelProcess
+	}
+	if options.ClientProcess != nil {
+		c.clientProcess = *options.ClientProcess
 	}
 	c.sessionMu.Lock()
 	c.session = sess

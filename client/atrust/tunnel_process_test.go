@@ -25,3 +25,27 @@ func TestDefaultEnvKeepsTheFallbacks(t *testing.T) {
 		t.Fatalf("process = %+v", process)
 	}
 }
+
+// The L3 environment reports the client that runs it, not the TCP requester:
+// the two options are separate on purpose.
+func TestL3ClientInfoUsesTheClientProcess(t *testing.T) {
+	client := &Client{
+		Username:      "user",
+		tunnelProcess: TunnelProcess{Name: "browser", Path: "/usr/bin/browser"},
+		clientProcess: TunnelProcess{Name: "client", Path: "/opt/client/bin/client", Version: "1.0"},
+	}
+	info := l3ClientInfo(client)
+	if info.processName != "client" || info.processPath != "/opt/client/bin/client" || info.processVersion != "1.0" {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+// Without a client process the upstream default stays, so a plain CLI that
+// passes neither option behaves as before.
+func TestL3ClientInfoKeepsTheDefaultWithoutAProcess(t *testing.T) {
+	info := l3ClientInfo(&Client{})
+	env := defaultEnv(info)
+	if env.Application.Runtime.Process.Name != "zju-connect" {
+		t.Fatalf("process name = %q", env.Application.Runtime.Process.Name)
+	}
+}

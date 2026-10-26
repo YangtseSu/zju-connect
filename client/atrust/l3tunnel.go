@@ -45,6 +45,20 @@ const (
 	defaultReconnectInterval = 5 * time.Second
 )
 
+// l3ClientInfo is what one L3 authorisation reports. The process block is the
+// client that runs the environment, not the TCP requester.
+func l3ClientInfo(c *Client) clientInfo {
+	return clientInfo{
+		sidProvider:    c.sessionSID,
+		deviceID:       c.DeviceID,
+		connectionID:   c.ConnectionID,
+		username:       c.Username,
+		processName:    c.clientProcess.Name,
+		processPath:    c.clientProcess.Path,
+		processVersion: c.clientProcess.Version,
+	}
+}
+
 func NewL3Tunnel(aTrustClient *Client) (*L3Tunnel, error) {
 	t := &L3Tunnel{
 		client:            aTrustClient,
@@ -56,15 +70,7 @@ func NewL3Tunnel(aTrustClient *Client) (*L3Tunnel, error) {
 		closeCh:           make(chan struct{}),
 	}
 	t.connect = func(ctx context.Context, addr string, conntrackMgr *conntrackMgr) (*l3TunnelConn, error) {
-		info := clientInfo{
-			sidProvider:    aTrustClient.sessionSID,
-			deviceID:       aTrustClient.DeviceID,
-			connectionID:   aTrustClient.ConnectionID,
-			username:       aTrustClient.Username,
-			processName:    aTrustClient.tunnelProcess.Name,
-			processPath:    aTrustClient.tunnelProcess.Path,
-			processVersion: aTrustClient.tunnelProcess.Version,
-		}
+		info := l3ClientInfo(aTrustClient)
 		dialTLS := func(ctx context.Context, network, address string, config *tls.Config) (*tls.Conn, error) {
 			return dialTLSContext(ctx, aTrustClient.underlayDialer, network, address, tlsConfig(config, aTrustClient.tlsKeyLogWriter))
 		}
