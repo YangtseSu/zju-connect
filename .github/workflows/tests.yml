@@ -1,18 +1,15 @@
 name: Tests
 
-# Fork-only workflow (this file does not exist upstream): upstream CI only
-# builds, so this is where the suite actually runs. It also accepts a `ref`
+# Fork-only workflow (this file does not exist upstream): it accepts a `ref`
 # input, which lets any branch be tested from the CLI without adding this file
 # to that branch:
 #
 #   gh workflow run tests.yml --repo YangtseSu/zju-connect -f ref=<branch>
 
 on:
-  push:
-    # `dev` is where this fork's work lands and what its packages build, so the
-    # suite has to run there; `main` is the pristine mirror of upstream.
-    branches: [ main, dev ]
-  pull_request:
+  # The suite also runs in build.yml, which is upstream's own workflow: this
+  # file only adds what that cannot do, namely test an arbitrary ref from the
+  # CLI without adding the file to that branch.
   workflow_dispatch:
     inputs:
       ref:
