@@ -162,6 +162,7 @@ func (s *Session) authConfigContext(ctx context.Context, mod, needTicket, refres
 	if re.Data.AntiReplayRand != "" {
 		s.antiReplayRand = re.Data.AntiReplayRand
 	}
+	s.signKey = sangforSignatureKey(re.Data.AntiMITM)
 	s.stateMu.Unlock()
 
 	isLogin := 0
@@ -279,6 +280,7 @@ func (s *Session) reportEnv() error {
 				"device": map[string]interface{}{
 					"type": "browser",
 				},
+				"mac_addresses": s.macAddresses,
 			},
 		},
 	}
@@ -289,6 +291,7 @@ func (s *Session) reportEnv() error {
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
+	req.Header.Set("X-Request-Sig", sangforHMAC(s.signKey, append([]byte("/controller/v1/public/reportEnv?"+WithSharedParams(nil).Encode()), body...)))
 
 	resp, err := s.request(req)
 	if err != nil {

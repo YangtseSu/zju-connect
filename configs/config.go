@@ -58,13 +58,14 @@ type Config struct {
 	SID            string `koanf:"sid"`
 	// SIDTicket is the portal-issued ticket the restore path exchanges for a
 	// session; SIDTicketFile reads it from a file instead of the command line.
-	SIDTicket               string `koanf:"sid_ticket"`
-	SIDTicketFile           string `koanf:"sid_ticket_file"`
-	DeviceID                string `koanf:"device_id"`
-	SignKey                 string `koanf:"sign_key"`
-	ResourceFile            string `koanf:"resource_file"`
-	UpdateBestNodesInterval int    `koanf:"update_best_nodes_interval"`
-	SessionRefreshInterval  int    `koanf:"session_refresh_interval"`
+	SIDTicket               string   `koanf:"sid_ticket"`
+	SIDTicketFile           string   `koanf:"sid_ticket_file"`
+	DeviceID                string   `koanf:"device_id"`
+	MACAddresses            []string `koanf:"mac_addresses"`
+	SignKey                 string   `koanf:"sign_key"`
+	ResourceFile            string   `koanf:"resource_file"`
+	UpdateBestNodesInterval int      `koanf:"update_best_nodes_interval"`
+	SessionRefreshInterval  int      `koanf:"session_refresh_interval"`
 	// AutoRelogin lets a dead session repeat the full login. Off by default: a
 	// login rotates the device token and drops other clients of the account.
 	AutoRelogin bool `koanf:"auto_relogin"`

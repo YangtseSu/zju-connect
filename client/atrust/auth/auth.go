@@ -58,6 +58,7 @@ type Cookie struct {
 type ClientAuthData struct {
 	Cookies           []Cookie        `json:"cookies"`
 	DeviceID          string          `json:"device_id"`
+	MACAddresses      []string        `json:"mac_addresses,omitempty"`
 	ServerVersionInfo json.RawMessage `json:"server_version_info,omitempty"`
 	// CSRFToken comes from the last authConfig and is what the restore path
 	// (sessionIdExchange) has to send, so a cold restore needs it.
@@ -109,16 +110,19 @@ type Session struct {
 	ctxMu sync.RWMutex
 	ctx   context.Context
 	// stateMu guards the fields a portal answer updates (csrfToken, ticket,
-	// pubKey, pubKeyExp, antiReplayRand). Each response writes them in one short
-	// critical section. It does not serialize requests: Refresh, RestoreByTicket
-	// and Login may run concurrently, and the last writer wins. Callers that must
-	// not interleave them serialize themselves; the recovery ladder's `recovering`
-	// guard and the renewal loop's pause are what do that for the session paths.
-	stateMu    sync.Mutex
-	client     *http.Client
-	deviceID   string
-	username   string
-	totpSecret string
+	// pubKey, pubKeyExp, antiReplayRand, signKey). Each response writes them in
+	// one short critical section. It does not serialize requests: Refresh,
+	// RestoreByTicket and Login may run concurrently, and the last writer wins.
+	// Callers that must not interleave them serialize themselves; the recovery
+	// ladder's `recovering` guard and the renewal loop's pause are what do that
+	// for the session paths.
+	stateMu      sync.Mutex
+	client       *http.Client
+	deviceID     string
+	macAddresses []string
+	signKey      []byte
+	username     string
+	totpSecret   string
 
 	baseHost string
 	baseURL  string
@@ -255,6 +259,7 @@ type AuthInfo struct {
 
 type LoginOptions struct {
 	DeviceID         string
+	MACAddresses     []string
 	Cookies          []Cookie
 	TOTPSecret       string
 	ChallengeHandler authchallenge.Handler
@@ -380,7 +385,7 @@ func (s *Session) continueAuth(step authStep) error {
 		case "auth/preEnhancedAuth", "auth/enhancedConfirm", "auth/enhancedDone":
 			step, err = s.completeEnhancedAuth(step)
 		case "auth/bindAuthDevice":
-			step, err = s.bindAuthDevice(step)
+			step, err = s.bindAuthDevice()
 		case "auth/modifyPwd":
 			step, err = s.completePasswordChange()
 		case "auth/token":
@@ -442,6 +447,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 	}
 
 	s.deviceID = opts.DeviceID
+	s.macAddresses = opts.MACAddresses
 	s.totpSecret = opts.TOTPSecret
 	s.challengeHandler = opts.ChallengeHandler
 	s.deviceBindHandler = opts.DeviceBindHandler

@@ -182,11 +182,12 @@ func main() {
 
 		vpnClient = atrustclient.NewClient(atrustclient.ClientOptions{
 			Session: atrustclient.SessionOptions{
-				Username:  conf.Username,
-				SID:       conf.SID,
-				DeviceID:  conf.DeviceID,
-				SignKey:   conf.SignKey,
-				SIDTicket: sidTicket,
+				Username:     conf.Username,
+				SID:          conf.SID,
+				DeviceID:     conf.DeviceID,
+				MACAddresses: conf.MACAddresses,
+				SignKey:      conf.SignKey,
+				SIDTicket:    sidTicket,
 			},
 			UnderlayDialer:  underlayDialer,
 			TLSKeyLogWriter: tlsKeyLogWriter,
